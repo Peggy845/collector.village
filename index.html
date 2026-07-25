@@ -1,0 +1,252 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Collector.Village — 你的收藏，全都在這裡</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=Noto+Sans+TC:wght@400;500;700&display=swap');
+
+  :root{
+    --ink:#1c1b18;
+    --paper:#f6f3ec;
+    --card:#ffffff;
+    --line:#dedad0;
+    --accent:#3a5a40;
+    --accent-soft:#e4ebe2;
+    --stamp:#b5471b;
+  }
+
+  *{ box-sizing:border-box; margin:0; padding:0; }
+
+  body{
+    background:var(--paper);
+    color:var(--ink);
+    font-family:'Noto Sans TC','Space Grotesk',sans-serif;
+    min-height:100vh;
+    display:flex;
+    flex-direction:column;
+    align-items:center;
+    justify-content:center;
+    padding:6vh 6vw;
+    line-height:1.7;
+  }
+
+  .frame{
+    width:100%;
+    max-width:720px;
+    border:1px solid var(--line);
+    background:var(--card);
+    padding:5vh 6vw;
+    position:relative;
+  }
+
+  .frame::before{
+    content:"";
+    position:absolute;
+    inset:10px;
+    border:1px dashed var(--line);
+    pointer-events:none;
+  }
+
+  .eyebrow{
+    font-family:'Space Grotesk',sans-serif;
+    font-size:13px;
+    letter-spacing:0.14em;
+    text-transform:uppercase;
+    color:var(--accent);
+    margin-bottom:1.2rem;
+  }
+
+  h1{
+    font-family:'Space Grotesk',sans-serif;
+    font-weight:700;
+    font-size:clamp(2.2rem, 6vw, 3.4rem);
+    line-height:1.1;
+    letter-spacing:-0.01em;
+    margin-bottom:1rem;
+  }
+
+  h1 span{ color:var(--accent); }
+
+  .sub{
+    font-size:1.05rem;
+    color:#4a473f;
+    max-width:46ch;
+    margin-bottom:2.4rem;
+  }
+
+  .catalog{
+    display:grid;
+    grid-template-columns:repeat(6,1fr);
+    gap:8px;
+    margin-bottom:2.4rem;
+  }
+
+  .slot{
+    aspect-ratio:1;
+    border:1px solid var(--line);
+    background:var(--accent-soft);
+    position:relative;
+    overflow:hidden;
+  }
+
+  .slot.filled{
+    background:var(--accent);
+  }
+
+  .slot.filled::after{
+    content:"✓";
+    position:absolute;
+    inset:0;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    color:#fff;
+    font-size:14px;
+    font-weight:700;
+  }
+
+  .progress-label{
+    font-family:'Space Grotesk',sans-serif;
+    font-size:13px;
+    color:#6b6858;
+    margin-bottom:2.6rem;
+  }
+
+  .progress-label b{ color:var(--ink); }
+
+  .divider{
+    height:1px;
+    background:var(--line);
+    margin-bottom:2rem;
+  }
+
+  .status-row{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    flex-wrap:wrap;
+    gap:1rem;
+  }
+
+  .stamp{
+    display:inline-flex;
+    align-items:center;
+    gap:8px;
+    border:1.5px solid var(--stamp);
+    color:var(--stamp);
+    font-family:'Space Grotesk',sans-serif;
+    font-size:12px;
+    font-weight:700;
+    letter-spacing:0.08em;
+    text-transform:uppercase;
+    padding:6px 12px;
+    transform:rotate(-2deg);
+  }
+
+  .dot{
+    width:6px; height:6px;
+    border-radius:50%;
+    background:var(--stamp);
+  }
+
+  form{
+    display:flex;
+    gap:8px;
+    flex:1;
+    min-width:240px;
+  }
+
+  input[type=email]{
+    flex:1;
+    border:1px solid var(--line);
+    background:var(--paper);
+    padding:10px 12px;
+    font-family:'Noto Sans TC',sans-serif;
+    font-size:14px;
+    color:var(--ink);
+  }
+
+  input[type=email]:focus{
+    outline:2px solid var(--accent);
+    outline-offset:1px;
+  }
+
+  button{
+    border:1px solid var(--ink);
+    background:var(--ink);
+    color:var(--paper);
+    padding:10px 18px;
+    font-family:'Space Grotesk',sans-serif;
+    font-size:14px;
+    font-weight:500;
+    cursor:pointer;
+    white-space:nowrap;
+  }
+
+  button:hover{ background:var(--accent); border-color:var(--accent); }
+
+  .note{
+    margin-top:1.6rem;
+    font-size:13px;
+    color:#8a8776;
+  }
+
+  footer{
+    margin-top:2rem;
+    font-size:12px;
+    color:#8a8776;
+    font-family:'Space Grotesk',sans-serif;
+  }
+
+  @media (max-width:480px){
+    .catalog{ grid-template-columns:repeat(5,1fr); }
+    .status-row{ flex-direction:column; align-items:flex-start; }
+    form{ width:100%; }
+  }
+</style>
+</head>
+<body>
+
+  <div class="frame">
+    <div class="eyebrow">收藏管理計畫 · 建置中</div>
+    <h1>整理你的<span>周邊收藏</span>，<br>從勾一個格子開始。</h1>
+    <p class="sub">Collector.Village 正在準備第一個收藏庫——先從《進擊的巨人》開始。上架後就能瀏覽完整周邊清單，勾選你已擁有的，追蹤還缺哪些。</p>
+
+    <div class="catalog" id="catalog"></div>
+    <p class="progress-label">目前進度 <b>規劃階段</b> · 收藏庫尚未開放</p>
+
+    <div class="divider"></div>
+
+    <div class="status-row">
+      <span class="stamp"><span class="dot"></span>Coming soon</span>
+      <form onsubmit="handleSubmit(event)">
+        <input type="email" id="emailInput" placeholder="留下 email，上線通知你" required>
+        <button type="submit">通知我</button>
+      </form>
+    </div>
+    <p class="note" id="formNote"></p>
+
+    <footer>Collector.Village — 一人開發中的收藏追蹤計畫</footer>
+  </div>
+
+<script>
+  const catalog = document.getElementById('catalog');
+  const total = 24;
+  const filled = 7;
+  for(let i=0;i<total;i++){
+    const s = document.createElement('div');
+    s.className = 'slot' + (i < filled ? ' filled' : '');
+    catalog.appendChild(s);
+  }
+
+  function handleSubmit(e){
+    e.preventDefault();
+    const note = document.getElementById('formNote');
+    note.textContent = '這是佔位頁面，尚未接上真正的通知系統——之後串好資料庫會補上這個功能。';
+  }
+</script>
+
+</body>
+</html>
