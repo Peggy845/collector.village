@@ -543,7 +543,7 @@ Vercel 專案 `qa-clinic-taiwan/collector-village` 是沿用舊靜態佔位頁�
 
 ### 已知缺口 / 下一步待辦（依優先順序）
 
-1. **本機已 commit 但尚未 push**：收納冊功能、資料庫直連工具、首頁文案、Footer 聲明。下次請 Claude Code 繼續前，先確認是否已經 push，避免搞混本機/正式站的狀態。
+1. ~~本機已 commit 但尚未 push~~ **已於 2026-07-28 push 並確認正式站部署成功**（收納冊功能、資料庫直連工具、首頁文案、Footer 聲明皆已上線，curl 驗證過首頁文案與 `/albums` 保護路由正常）。
 2. 修正 `products.csv` 中 2 筆錯位資料並重新匯入（非急迫，屬於資料完整性小尾巴，見上方「CSV 匯入結果」）。
 3. 商品清單頁 pagination 目前每頁 48 筆，資料量變大後可視需要調整。
 4. 目前 `collector-village-git-main-qa-clinic-taiwan.vercel.app` 這個分支別名網址有 Vercel Deployment Protection（會導到 SSO 登入頁），主要正式網址 `collector-village-nine.vercel.app` 不受影響，如不需要可忽略。
