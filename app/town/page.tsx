@@ -11,6 +11,7 @@ export const metadata: Metadata = {
 const OPEN_BUILDINGS = [
   { href: '/dashboard', emoji: '📚', name: '圖書館', desc: '我的收藏紀錄' },
   { href: '/browse', emoji: '🏠', name: '家', desc: '收藏庫瀏覽與想要清單' },
+  { href: '/albums', emoji: '📔', name: '收納冊', desc: '整理收藏、產生分享連結' },
 ];
 
 const FUTURE_BUILDINGS = [

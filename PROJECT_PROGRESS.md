@@ -289,6 +289,29 @@ collector-village/
 - Claude Code（月費訂閱制，$20/月 Pro 方案即含）：最後階段實際建置專案、寫 API、串資料庫。
 - 目前不用 Gemini 做正式資料整理（可靠度疑慮），改為由 Claude 對話 + 使用者自行查證真實商品資料。
 
+### 29. 我的收納冊功能定案（第27次討論）
+- **背景**：使用者構想一個把「已擁有」商品用類似實體小卡收納冊的視覺方式呈現的功能（畫面參考：收納櫃種類/名稱下拉選單、格狀商品排列、新增收納冊、左右翻頁），提出手繪 wireframe 討論。
+- **與既有規劃的關係釐清**：
+  - 這不是取代 `/browse`（收藏庫瀏覽頁，篩選清單式），而是新增一個獨立頁面，讓使用者用「收藏冊」的方式整理、瀏覽自己已擁有的商品。
+  - 曾考慮做「小屋保險箱（私人）／書櫃（公開，訪客可逛進來翻看）」的空間視覺化分享方式，但這本質上等於重新做出第10/21項已明確排除在 MVP 外的「虛擬小屋訪問系統」，且「訪客隨意逛」的呈現方式容易誘發第12-1項要避免的比較心態。**最終決定不做**，改用下方簡化版分享機制。
+- **分享機制（簡化版，沿用第16項「分享連結」設計）**：
+  - 每本收納冊有「公開／私人」開關，預設私人。
+  - 設為公開時，系統產生一組唯讀分享連結（不可搜尋、不出現在任何公開列表／探索頁），使用者自行決定要不要把連結傳出去，性質上是一次性、主動的分享行為，跟系統驅動的公開展示／排行榜不同。
+  - **明確排除**：不做「瀏覽所有使用者公開收納冊」的探索/廣場頁面；不做小屋空間視覺化訪問系統。這兩點之後若使用者規模明顯成長，可再重新評估。
+  - 公開檢視頁只顯示商品圖片與名稱，**不顯示備註、入手日期等個人資訊**。
+- **商品放入規則**：只能從自己標記為 `owned_real` 或 `owned_virtual` 的商品中選取放入格子；`wanted` 狀態商品不可放入（尚未實際擁有，無實體卡可收納）。同一件商品可同時放入多本不同收納冊，但同一本收納冊內不可重複放入同一件商品。
+- **版面格數規則（套用現實小卡冊固定規格，不做自由拖拉排版）**：
+  - 1格（1×1）
+  - 2格（1×2 或 2×1，使用者可選方向）
+  - 3格（1×3 或 3×1，使用者可選方向）
+  - 4格（固定 2×2）
+  - 6格（固定 2×3）
+  - 8格（固定 2×4）
+  - 9格（固定 3×3）
+  - 新增頁面時從上述模板擇一套用，不提供任意行列數的自訂排版，降低開發複雜度。
+- **資料庫新增三張表**（`collection_albums`、`album_pages`、`album_slots`，完整 SQL 見下方 SQL schema 區塊）。
+- **範圍界定**：此功能目前僅完成規劃討論，尚未交給 Claude Code 開發，待整理成具體指令後再排入開發順序。
+
 ---
 
 ## 🔲 待完成項目（可以用對話型 AI 先做完，不需要 Claude Code）
@@ -314,6 +337,7 @@ collector-village/
 - [x] 玩家上傳照片功能（串接 Supabase Storage）—— 規格已定案（見「已定案項目 17」）
 - [x] CSV 批次匯入商品資料的後台工具 —— `scripts/import-products.mjs`（`npm run import:products`），已實際匯入 `products.csv` 400/402 筆（2筆因來源資料欄位錯位被自動跳過，見下方說明）
 - [x] 部署到 Vercel —— `https://collector-village-nine.vercel.app/` 已是正式版，過程中踩到一個雷見下方「部署踩雷記錄」
+- [ ] 「我的收納冊」功能（新頁面 `/albums`）—— 規格已定案（見「已定案項目 29」），含 `collection_albums`/`album_pages`/`album_slots` 三張新表、固定版面模板、簡化版分享連結機制，尚未交給 Claude Code 開發
 
 ### 資料庫 SQL（已定案，可直接交給 Claude Code）
 
@@ -370,6 +394,38 @@ CREATE TABLE user_collections (
   created_at TIMESTAMP DEFAULT now(),
   UNIQUE(user_id, product_id, owned_type)
 );
+
+-- 以下三張表對應「已定案項目 29：我的收納冊功能」
+
+CREATE TABLE collection_albums (
+  id SERIAL PRIMARY KEY,
+  user_id INT REFERENCES users(id) NOT NULL,
+  name TEXT NOT NULL,                        -- 使用者自訂收納冊名稱，例如「巨人小卡收藏」
+  album_type TEXT,                           -- 收納櫃種類，如小卡收納櫃/徽章/海報，純文字分類用途，不限制可用版面模板
+  is_public BOOLEAN DEFAULT false,           -- 公開/私人開關，預設私人
+  share_token TEXT UNIQUE,                   -- 設為公開時產生的唯一亂碼字串，用於分享連結網址，私人時可為空
+  created_at TIMESTAMP DEFAULT now()
+);
+
+CREATE TABLE album_pages (
+  id SERIAL PRIMARY KEY,
+  album_id INT REFERENCES collection_albums(id) ON DELETE CASCADE NOT NULL,
+  page_number INT NOT NULL,                  -- 頁碼，決定左右翻頁順序
+  layout_type TEXT NOT NULL,                 -- 版面模板：'1','2h','2v','3h','3v','4','6','8','9'（h=橫向/水平排列，v=直向/垂直排列，僅2格3格有方向選擇）
+  created_at TIMESTAMP DEFAULT now()
+);
+
+CREATE TABLE album_slots (
+  id SERIAL PRIMARY KEY,
+  page_id INT REFERENCES album_pages(id) ON DELETE CASCADE NOT NULL,
+  slot_index INT NOT NULL,                   -- 格子在頁面中的順序位置（由左至右、由上至下）
+  user_collection_id INT REFERENCES user_collections(id), -- 對應放入的商品收藏紀錄，可為空表示空格
+  UNIQUE(page_id, slot_index)
+);
+
+-- RLS 政策方向（實際語法待 Claude Code 依 Supabase Auth 慣例撰寫）：
+-- collection_albums：SELECT 允許 user_id = auth.uid() 或 is_public = true；INSERT/UPDATE/DELETE 僅限 user_id = auth.uid()
+-- album_pages / album_slots：比照上層 collection_albums 的公開/私人狀態與擁有者判斷（透過 album_id 關聯查詢）
 ```
 
 ---
@@ -404,6 +460,7 @@ CREATE TABLE user_collections (
 | 第24次 | 建置提示文件產出+資料處理流程定案 | 產出獨立的claude-code-build-brief.md收斂27項定案內容供交給Claude Code使用；定案商品資料處理標準流程（AI草稿→自動驗證腳本→人工校對三階段），不限單一AI工具 |
 | 第25次 | Gemini爬蟲CSV驗證與清理 | 上傳460筆Gemini搜尋成果CSV，執行驗證腳本抓出：28筆重複表頭列、11筆重複商品、3筆欄位錯位、1筆美金報價、15筆系列名稱殘留日文；正式採納「布娃娃類」為第9個大分類；使用者決定不逐筆複查，直接移除全部19筆有問題資料，最終保留402筆乾淨資料，遺漏部分留待玩家回報機制（第20項）補足 |
 | 第26次 | 小鎮總覽視覺概念+美術風格決策流程 | 新增「小鎮總覽」為登入後首頁，包裝既有頁面（圖書館=收藏總覽、家=收藏庫/想要清單），未來擴充建築（工廠/超市/市集/服飾店）以「看得到點不進去」方式先呈現，不超出MVP範圍；釐清資料夾/路由層級屬低成本可調整項目；定案美術風格分三階段處理（MVP先用平面圖示風格，不現在決定最終風格） |
+| 第27次 | 「我的收納冊」功能討論（wireframe手繪圖） | 定位為新增獨立頁面，不取代`/browse`；曾考慮「小屋保險箱/書櫃」空間視覺化分享方式，因等同重做已排除的小屋訪問系統且易誘發比較心態而否決，改採沿用第16項分享連結機制的簡化版（每本收納冊可設公開/私人，公開產生唯讀連結，不做探索廣場頁）；格數採固定套用現實小卡冊規格（1/2/3/4/6/8/9格），不做自由拖拉排版；資料庫新增collection_albums/album_pages/album_slots三表；規劃完成，待整理成Claude Code開發指令 |
 
 ---
 
@@ -434,8 +491,11 @@ CREATE TABLE user_collections (
 | Header 導覽列 | 全站共用，依登入狀態顯示不同連結 |
 | `supabase/schema.sql` | 完整建表 SQL + RLS 政策 + `collection-photos` Storage bucket 設定，可重複執行 |
 | `scripts/import-products.mjs` | CSV 批次匯入腳本（`npm run import:products`），必填欄位檢查+重複偵測(系列+名稱+賞別)+內容規則警告(綜合標籤/分類清單外/日文殘留/價格格式)，執行後印出成功/跳過/警告報告 |
+| `/albums` | 我的收納冊清單：新增收納冊、刪除收納冊，卡片顯示頁數與公開/私人狀態 |
+| `/albums/[id]` | 收納冊編輯：九選一版面模板新增頁面、左右翻頁、點格子選商品（僅限已擁有/虛擬收藏，同一商品同一收納冊不可重複選入）、移除格子、公開/私人切換（切公開自動產生 `share_token`）+ 複製分享連結 |
+| `/albums/share/[token]` | 公開唯讀檢視，不需登入；只顯示商品名稱與使用者自己上傳的照片，不顯示備註/入手日期/擁有狀態；未公開或 token 不存在一律回 404，不透露私人收納冊存在 |
 
-驗證狀態：`npm run build`、`npx tsc --noEmit`、`npm run lint` 均通過；dev server 逐一路由 curl 測試無誤（受保護頁面未登入時正確 307 導向 `/login`）；`products.csv` 已實際匯入資料庫，`/browse` 顯示 400 件商品共 9 頁，`/products/1` 等詳情頁確認能正確顯示真實資料。**正式環境（Vercel）已於 2026-07-28 部署成功並用 curl+瀏覽器截圖驗證首頁/browse/商品詳情頁皆正常顯示真實資料。**
+驗證狀態：`npm run build`、`npx tsc --noEmit`、`npm run lint` 均通過；dev server 逐一路由 curl 測試無誤（受保護頁面未登入時正確 307 導向 `/login`）；`products.csv` 已實際匯入資料庫，`/browse` 顯示 400 件商品共 9 頁，`/products/1` 等詳情頁確認能正確顯示真實資料。**正式環境（Vercel）已於 2026-07-28 部署成功並用 curl+瀏覽器截圖驗證首頁/browse/商品詳情頁皆正常顯示真實資料。**收藏標記/備註/照片上傳/我的收藏統計/想要清單/個人設定/刪除帳號整條流程也已用真實測試帳號在正式環境操作過一遍，全部正常（刪除帳號會連 Storage 照片、`auth.users`、`user_collections` 一併清乾淨，已用腳本查證）。
 
 ### CSV 匯入結果（2026-07-28）
 
@@ -454,10 +514,24 @@ Vercel 專案 `qa-clinic-taiwan/collector-village` 是沿用舊靜態佔位頁�
 
 **如果之後又遇到網站回應 Vercel 的 `NOT_FOUND`（純文字、非 App 樣式）**，優先檢查這個 Framework Preset 設定，而不是懷疑程式碼或環境變數。
 
+### 資料庫直連工具（2026-07-28 新增）
+
+- `.env.local` 新增 `DATABASE_URL`（Supabase 專案 Settings > Database > Connection string，用 Session pooler 那組），加上 `scripts/run-sql.mjs`（`node --env-file=.env.local scripts/run-sql.mjs <sql檔案>`），Claude Code 之後可以直接執行 schema 變更，**不再需要每次請你手動貼到 Supabase SQL Editor**。
+- 用途僅限本機開發時執行 SQL；正式站（Vercel）不需要、也沒有設定這個環境變數。
+
+### 我的收納冊功能（2026-07-28，依 `claude-code-instructions-albums.md` 規格開發）
+
+- 新增 `collection_albums`／`album_pages`／`album_slots` 三張表 + RLS 政策（本人可完全操作，`is_public=true` 時任何人含未登入訪客可讀）。
+- **規格書裡 `collection_albums.user_id` 原寫 `INT`，但實際 `public.users.id` 是 `uuid`（Supabase Auth 設計），已修正為 `uuid` 才能正確建表**，供之後對照規格書時留意這個落差。
+- 「同一商品不可重複選入同一收納冊」在資料庫層沒有辦法直接用唯一約束表達（`album_slots` 只知道 `page_id`，不知道所屬 `album_id`），改在應用層（`lib/supabase/albums.ts` 的 `assignSlotProduct`）跨頁查詢比對後擋下。
+- 公開分享頁的照片簽名網址：訪客未登入、無法用一般 RLS 規則簽出他人私人 Storage 裡的照片，`/albums/share/[token]` 改用 service role（`createAdminClient`）產生簽名網址，前提是已經先用一般權限的 client 確認過 `is_public = true` 才會走到這步，範圍有限縮，不是整頁繞過權限檢查。
+- 已用真實測試帳號在本機 dev server 走過一遍：新增收納冊→選 6 格版面→選 2 件商品入格→確認同商品從可選清單消失→移除格子→新增第 2 頁（4格）→翻頁確認資料正確→設公開產生分享連結→無 cookie 的 curl 確認公開頁不需登入可看、且只顯示商品名稱→改回私人後分享連結立即 404→刪除收納冊確認 `album_pages`/`album_slots` 隨 cascade 一併清除→刪除帳號確認收納冊也隨 cascade 清除。全部正常。
+- **尚未部署到正式站**：這個功能目前只在本機驗證過，還沒 commit/push。
+
 ### 已知缺口 / 下一步待辦（依優先順序）
 
-1. 修正 `products.csv` 中 2 筆錯位資料並重新匯入（非急迫，屬於資料完整性小尾巴，見上方「CSV 匯入結果」）。
-2. **確認 Supabase Storage bucket 是否已建立**：`supabase/schema.sql` 底部有 `insert into storage.buckets (...)`，理論上執行 schema.sql 時會一併建立 `collection-photos` bucket；如果照片上傳功能實測失敗，先去 Supabase Dashboard > Storage 確認 bucket 存在。
+1. **收納冊功能 commit + push 到正式站**，部署後建議至少手動看一次公開分享連結在正式網址下也正常。
+2. 修正 `products.csv` 中 2 筆錯位資料並重新匯入（非急迫，屬於資料完整性小尾巴，見上方「CSV 匯入結果」）。
 3. 商品清單頁 pagination 目前每頁 48 筆，資料量變大後可視需要調整。
 4. 目前 `collector-village-git-main-qa-clinic-taiwan.vercel.app` 這個分支別名網址有 Vercel Deployment Protection（會導到 SSO 登入頁），主要正式網址 `collector-village-nine.vercel.app` 不受影響，如不需要可忽略。
 

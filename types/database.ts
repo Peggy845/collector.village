@@ -1,5 +1,6 @@
 export type OwnedStatus = 'owned_real' | 'owned_virtual' | 'wanted';
 export type SubmissionStatus = 'pending' | 'approved' | 'rejected';
+export type LayoutType = '1' | '2h' | '2v' | '3h' | '3v' | '4' | '6' | '8' | '9';
 
 export interface Ip {
   id: number;
@@ -51,6 +52,31 @@ export interface UserCollectionEntry {
   note: string | null;
   acquired_date: string | null;
   created_at: string;
+}
+
+export interface CollectionAlbum {
+  id: number;
+  user_id: string;
+  name: string;
+  album_type: string | null;
+  is_public: boolean;
+  share_token: string | null;
+  created_at: string;
+}
+
+export interface AlbumPage {
+  id: number;
+  album_id: number;
+  page_number: number;
+  layout_type: LayoutType;
+  created_at: string;
+}
+
+export interface AlbumSlot {
+  id: number;
+  page_id: number;
+  slot_index: number;
+  user_collection_id: number | null;
 }
 
 export interface ProductSubmission {

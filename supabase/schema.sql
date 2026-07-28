@@ -101,7 +101,40 @@ create table if not exists public.user_collections (
 );
 
 -- =========================================
--- 6. product_submissions
+-- 6. collection_albums / album_pages / album_slots（我的收納冊功能）
+-- =========================================
+-- 注意：claude-code-instructions-albums.md 原始規格寫 collection_albums.user_id 為 INT，
+-- 但實際 public.users.id 是 uuid（見上方第4節說明），這裡依實際 schema 修正為 uuid。
+
+create table if not exists public.collection_albums (
+  id serial primary key,
+  user_id uuid references public.users(id) on delete cascade,
+  name text not null,
+  album_type text,                           -- 自由文字欄位，例如「小卡收納簿」「徽章收納冊」，不限制選項
+  is_public boolean default false,
+  share_token text unique,                   -- 設為公開時產生，供 /albums/share/[token] 使用
+  created_at timestamp default now()
+);
+
+create table if not exists public.album_pages (
+  id serial primary key,
+  album_id int references public.collection_albums(id) on delete cascade not null,
+  page_number int not null,
+  layout_type text not null,                 -- '1'/'2h'/'2v'/'3h'/'3v'/'4'/'6'/'8'/'9'，對應前端固定版面模板
+  created_at timestamp default now(),
+  unique(album_id, page_number)
+);
+
+create table if not exists public.album_slots (
+  id serial primary key,
+  page_id int references public.album_pages(id) on delete cascade not null,
+  slot_index int not null,
+  user_collection_id int references public.user_collections(id) on delete set null,
+  unique(page_id, slot_index)
+);
+
+-- =========================================
+-- 7. product_submissions
 -- =========================================
 create table if not exists public.product_submissions (
   id serial primary key,
@@ -133,6 +166,9 @@ alter table public.series enable row level security;
 alter table public.products enable row level security;
 alter table public.users enable row level security;
 alter table public.user_collections enable row level security;
+alter table public.collection_albums enable row level security;
+alter table public.album_pages enable row level security;
+alter table public.album_slots enable row level security;
 alter table public.product_submissions enable row level security;
 
 -- ips / series / products：所有人（含未登入訪客）可讀，寫入僅限 service role（此處不建任何 insert/update/delete policy，
@@ -165,6 +201,101 @@ create policy "own collections update" on public.user_collections for update usi
 
 drop policy if exists "own collections delete" on public.user_collections;
 create policy "own collections delete" on public.user_collections for delete using (auth.uid() = user_id);
+
+-- collection_albums：本人可完全操作；公開（is_public）時任何人（含未登入訪客）可讀，不透露私人收納冊的存在
+drop policy if exists "albums select own or public" on public.collection_albums;
+create policy "albums select own or public" on public.collection_albums
+  for select using (auth.uid() = user_id or is_public = true);
+
+drop policy if exists "albums insert own" on public.collection_albums;
+create policy "albums insert own" on public.collection_albums
+  for insert with check (auth.uid() = user_id);
+
+drop policy if exists "albums update own" on public.collection_albums;
+create policy "albums update own" on public.collection_albums
+  for update using (auth.uid() = user_id);
+
+drop policy if exists "albums delete own" on public.collection_albums;
+create policy "albums delete own" on public.collection_albums
+  for delete using (auth.uid() = user_id);
+
+-- album_pages：透過 album_id 往上查 collection_albums 的擁有者/公開狀態，套用相同判斷邏輯
+drop policy if exists "album pages select own or public" on public.album_pages;
+create policy "album pages select own or public" on public.album_pages
+  for select using (
+    exists (
+      select 1 from public.collection_albums a
+      where a.id = album_pages.album_id and (a.user_id = auth.uid() or a.is_public = true)
+    )
+  );
+
+drop policy if exists "album pages insert own" on public.album_pages;
+create policy "album pages insert own" on public.album_pages
+  for insert with check (
+    exists (
+      select 1 from public.collection_albums a
+      where a.id = album_pages.album_id and a.user_id = auth.uid()
+    )
+  );
+
+drop policy if exists "album pages update own" on public.album_pages;
+create policy "album pages update own" on public.album_pages
+  for update using (
+    exists (
+      select 1 from public.collection_albums a
+      where a.id = album_pages.album_id and a.user_id = auth.uid()
+    )
+  );
+
+drop policy if exists "album pages delete own" on public.album_pages;
+create policy "album pages delete own" on public.album_pages
+  for delete using (
+    exists (
+      select 1 from public.collection_albums a
+      where a.id = album_pages.album_id and a.user_id = auth.uid()
+    )
+  );
+
+-- album_slots：透過 page_id -> album_id 往上查，套用相同判斷邏輯
+drop policy if exists "album slots select own or public" on public.album_slots;
+create policy "album slots select own or public" on public.album_slots
+  for select using (
+    exists (
+      select 1 from public.album_pages p
+      join public.collection_albums a on a.id = p.album_id
+      where p.id = album_slots.page_id and (a.user_id = auth.uid() or a.is_public = true)
+    )
+  );
+
+drop policy if exists "album slots insert own" on public.album_slots;
+create policy "album slots insert own" on public.album_slots
+  for insert with check (
+    exists (
+      select 1 from public.album_pages p
+      join public.collection_albums a on a.id = p.album_id
+      where p.id = album_slots.page_id and a.user_id = auth.uid()
+    )
+  );
+
+drop policy if exists "album slots update own" on public.album_slots;
+create policy "album slots update own" on public.album_slots
+  for update using (
+    exists (
+      select 1 from public.album_pages p
+      join public.collection_albums a on a.id = p.album_id
+      where p.id = album_slots.page_id and a.user_id = auth.uid()
+    )
+  );
+
+drop policy if exists "album slots delete own" on public.album_slots;
+create policy "album slots delete own" on public.album_slots
+  for delete using (
+    exists (
+      select 1 from public.album_pages p
+      join public.collection_albums a on a.id = p.album_id
+      where p.id = album_slots.page_id and a.user_id = auth.uid()
+    )
+  );
 
 -- product_submissions：使用者只能新增與查看自己提交的紀錄；審核（更新 status）僅限 service role
 drop policy if exists "own submissions select" on public.product_submissions;

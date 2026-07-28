@@ -43,6 +43,9 @@ export default function Header() {
               <Link href="/wishlist" className="text-neutral-600 hover:text-neutral-900">
                 想要清單
               </Link>
+              <Link href="/albums" className="text-neutral-600 hover:text-neutral-900">
+                我的收納冊
+              </Link>
               <Link href="/settings" className="text-neutral-600 hover:text-neutral-900">
                 個人設定
               </Link>
