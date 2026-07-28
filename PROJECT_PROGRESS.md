@@ -14,9 +14,9 @@
 
 ---
 
-## 目前狀態：Claude Code 開發階段（核心頁面已建置完成，尚未匯入商品資料、尚未部署正式版）
+## 目前狀態：MVP 核心功能已上線（2026-07-28）
 
-**目前網址**：https://collector-village-nine.vercel.app/（Vercel 免費子網域，目前連的還是舊的靜態佔位頁 repo，尚未指向新的 Next.js 專案，`nine` 是自動加的字尾，之後可在 Vercel 專案設定改名）
+**目前網址**：https://collector-village-nine.vercel.app/ 已經是正式版 Next.js + Supabase 網站（不再是靜態佔位頁），`/browse` 可瀏覽 400 件已匯入的商品資料。`nine` 是 Vercel 自動加的字尾，之後可在 Vercel 專案設定改名。
 **本機專案路徑**：`C:\Users\Peggy\Downloads\Collecter.village.code`（Next.js + Supabase，已於 2026-07-28 commit 進 git）
 
 > 詳細的「已完成頁面清單」與「下一步待辦」見文件最下方新增的「## 🖥️ Claude Code 開發進度」區塊，每次跟 Claude Code 討論完新進度都回來更新那一節即可，不需要重看整份規劃文件。
@@ -313,7 +313,7 @@ collector-village/
 - [x] 勾選收藏功能 + 收藏進度計算與顯示
 - [x] 玩家上傳照片功能（串接 Supabase Storage）—— 規格已定案（見「已定案項目 17」）
 - [x] CSV 批次匯入商品資料的後台工具 —— `scripts/import-products.mjs`（`npm run import:products`），已實際匯入 `products.csv` 400/402 筆（2筆因來源資料欄位錯位被自動跳過，見下方說明）
-- [ ] 部署到 Vercel/Netlify（新 Next.js 專案尚未部署，Vercel 上目前還是舊的靜態佔位頁）**← 目前最優先待辦**
+- [x] 部署到 Vercel —— `https://collector-village-nine.vercel.app/` 已是正式版，過程中踩到一個雷見下方「部署踩雷記錄」
 
 ### 資料庫 SQL（已定案，可直接交給 Claude Code）
 
@@ -435,7 +435,7 @@ CREATE TABLE user_collections (
 | `supabase/schema.sql` | 完整建表 SQL + RLS 政策 + `collection-photos` Storage bucket 設定，可重複執行 |
 | `scripts/import-products.mjs` | CSV 批次匯入腳本（`npm run import:products`），必填欄位檢查+重複偵測(系列+名稱+賞別)+內容規則警告(綜合標籤/分類清單外/日文殘留/價格格式)，執行後印出成功/跳過/警告報告 |
 
-驗證狀態：`npm run build`、`npx tsc --noEmit`、`npm run lint` 均通過；dev server 逐一路由 curl 測試無誤（受保護頁面未登入時正確 307 導向 `/login`）；`products.csv` 已實際匯入資料庫，`/browse` 顯示 400 件商品共 9 頁，`/products/1` 等詳情頁確認能正確顯示真實資料。
+驗證狀態：`npm run build`、`npx tsc --noEmit`、`npm run lint` 均通過；dev server 逐一路由 curl 測試無誤（受保護頁面未登入時正確 307 導向 `/login`）；`products.csv` 已實際匯入資料庫，`/browse` 顯示 400 件商品共 9 頁，`/products/1` 等詳情頁確認能正確顯示真實資料。**正式環境（Vercel）已於 2026-07-28 部署成功並用 curl+瀏覽器截圖驗證首頁/browse/商品詳情頁皆正常顯示真實資料。**
 
 ### CSV 匯入結果（2026-07-28）
 
@@ -445,12 +445,21 @@ CREATE TABLE user_collections (
   - 第66列「立體機動裝置 水壺」（USJ 日本環球影城～進擊的巨人THE REAL～系列）
   - 修法：打開 `products.csv` 找到這兩列，把 manufacturer/official_price 欄位補上正確值（原始資料看起來分別是 BANDAI/¥500/2021-11-20 與 USJ/¥3200/2017-01-13），改好後重跑 `npm run import:products` 即可（腳本有重複偵測，其餘400筆不會被重複匯入）。
 
+### 部署踩雷記錄（2026-07-28，供之後參考）
+
+Vercel 專案 `qa-clinic-taiwan/collector-village` 是沿用舊靜態佔位頁時代建立的專案，**Build and Deployment 設定裡 Framework Preset 卡在「Other」**（沒有自動偵測成 Next.js）。第一次 push 新 Next.js 專案上去時，Vercel 用「Other」模式建置，結果整個網站每個路徑都回應 Vercel 平台層級的 `404 NOT_FOUND`（不是我們 App 的 404 頁，是 Vercel 直接擋在前面，連 Runtime Logs 都沒有任何紀錄，因為根本沒有呼叫到任何 serverless function）。
+
+排查方式：去 Vercel Dashboard → 專案 → Settings → Build and Deployment，看到 Framework Preset 顯示「Other」而非「Next.js」。
+修法：把 Framework Preset 改選為「Next.js」（Build/Output/Install/Dev Command 全部維持不 Override，用 Next.js 預設值即可）→ Save → 回 Deployments 列表對最新的部署按「Redeploy」（不勾 Use existing Build Cache）→ 重新建置後即恢復正常。
+
+**如果之後又遇到網站回應 Vercel 的 `NOT_FOUND`（純文字、非 App 樣式）**，優先檢查這個 Framework Preset 設定，而不是懷疑程式碼或環境變數。
+
 ### 已知缺口 / 下一步待辦（依優先順序）
 
-1. **部署到 Vercel**：目前 Vercel 上的網址還連著舊的靜態佔位頁 repo，新 Next.js 專案尚未部署，需要另外設定 Vercel 專案（含環境變數：`NEXT_PUBLIC_SUPABASE_URL`、`NEXT_PUBLIC_SUPABASE_ANON_KEY`、`SUPABASE_SERVICE_ROLE_KEY`）。
-2. 修正上述 2 筆錯位資料並重新匯入（非急迫，屬於資料完整性小尾巴）。
-3. **確認 Supabase Storage bucket 是否已建立**：`supabase/schema.sql` 底部有 `insert into storage.buckets (...)`，理論上執行 schema.sql 時會一併建立 `collection-photos` bucket；如果照片上傳功能實測失敗，先去 Supabase Dashboard > Storage 確認 bucket 存在。
-4. 商品清單頁 pagination 目前每頁 48 筆，資料量變大後可視需要調整。
+1. 修正 `products.csv` 中 2 筆錯位資料並重新匯入（非急迫，屬於資料完整性小尾巴，見上方「CSV 匯入結果」）。
+2. **確認 Supabase Storage bucket 是否已建立**：`supabase/schema.sql` 底部有 `insert into storage.buckets (...)`，理論上執行 schema.sql 時會一併建立 `collection-photos` bucket；如果照片上傳功能實測失敗，先去 Supabase Dashboard > Storage 確認 bucket 存在。
+3. 商品清單頁 pagination 目前每頁 48 筆，資料量變大後可視需要調整。
+4. 目前 `collector-village-git-main-qa-clinic-taiwan.vercel.app` 這個分支別名網址有 Vercel Deployment Protection（會導到 SSO 登入頁），主要正式網址 `collector-village-nine.vercel.app` 不受影響，如不需要可忽略。
 
 ---
 
