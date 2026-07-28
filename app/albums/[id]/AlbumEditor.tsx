@@ -92,7 +92,6 @@ export default function AlbumEditor({
         return;
       }
       setActiveSlotIndex(null);
-      setPickerSearch('');
       router.refresh();
     } catch {
       setError('選入失敗，請稍後再試');
@@ -108,6 +107,7 @@ export default function AlbumEditor({
     try {
       const supabase = createClient();
       await clearSlot(supabase, currentPage.page.id, slotIndex);
+      if (activeSlotIndex === slotIndex) setActiveSlotIndex(null);
       router.refresh();
     } catch {
       setError('移除失敗，請稍後再試');
@@ -168,93 +168,10 @@ export default function AlbumEditor({
 
       {error && <p className="text-sm text-red-600">{error}</p>}
 
-      {pages.length === 0 ? (
-        <div className="rounded border border-dashed border-neutral-300 p-8 text-center">
-          <p className="mb-4 text-sm text-neutral-500">這本收納冊還沒有任何頁面。</p>
-          <LayoutPicker onPick={handleAddPage} disabled={busy} />
-        </div>
-      ) : (
-        <>
-          <div className="flex items-center justify-between text-sm">
-            <button
-              type="button"
-              disabled={pageIdx === 0}
-              onClick={() => setPageIdx((i) => Math.max(0, i - 1))}
-              className="disabled:opacity-30"
-            >
-              ← 上一頁
-            </button>
-            <span>
-              第 {pageIdx + 1} / {pages.length} 頁
-            </span>
-            <button
-              type="button"
-              disabled={pageIdx === pages.length - 1}
-              onClick={() => setPageIdx((i) => Math.min(pages.length - 1, i + 1))}
-              className="disabled:opacity-30"
-            >
-              下一頁 →
-            </button>
-          </div>
-
-          {template && (
-            <div
-              className="grid gap-3"
-              style={{ gridTemplateColumns: `repeat(${template.cols}, minmax(0, 1fr))` }}
-            >
-              {Array.from({ length: template.slots }, (_, i) => {
-                const filled = slotAt(i);
-                return (
-                  <button
-                    key={i}
-                    type="button"
-                    onClick={() => setActiveSlotIndex(i)}
-                    className="flex aspect-square flex-col items-center justify-center gap-1 overflow-hidden rounded border border-neutral-300 p-2 text-center hover:border-neutral-500"
-                  >
-                    {filled?.photoUrl ? (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img src={filled.photoUrl} alt={filled.product?.name ?? ''} className="h-full w-full object-cover" />
-                    ) : filled?.product ? (
-                      <span className="text-xs">{filled.product.name}</span>
-                    ) : (
-                      <span className="text-2xl text-neutral-300">+</span>
-                    )}
-                  </button>
-                );
-              })}
-            </div>
-          )}
-
-          <button
-            type="button"
-            onClick={() => setShowLayoutPicker((v) => !v)}
-            className="self-start text-sm underline"
-          >
-            新增頁面
-          </button>
-          {showLayoutPicker && <LayoutPicker onPick={handleAddPage} disabled={busy} />}
-        </>
-      )}
-
-      {activeSlotIndex !== null && (
-        <div className="flex flex-col gap-3 rounded border border-neutral-200 p-4">
-          <div className="flex items-center justify-between">
-            <p className="text-sm font-medium">選擇商品放入這一格</p>
-            <div className="flex gap-3 text-xs">
-              {slotAt(activeSlotIndex)?.product && (
-                <button
-                  type="button"
-                  onClick={() => handleClearSlot(activeSlotIndex)}
-                  className="text-red-600 underline"
-                >
-                  移除這格
-                </button>
-              )}
-              <button type="button" onClick={() => setActiveSlotIndex(null)} className="text-neutral-500 underline">
-                關閉
-              </button>
-            </div>
-          </div>
+      <div className="flex flex-col gap-6 md:flex-row">
+        {/* 常駐商品清單：點選一個格子當目標，再從這裡點商品放入，不做拖拉（觸控裝置上拖拉體驗不佳） */}
+        <aside className="flex w-full flex-col gap-3 md:w-64 md:shrink-0">
+          <p className="text-sm font-medium">商品清單</p>
           <input
             type="text"
             placeholder="搜尋商品名稱"
@@ -262,25 +179,130 @@ export default function AlbumEditor({
             onChange={(e) => setPickerSearch(e.target.value)}
             className="rounded border border-neutral-300 px-3 py-2 text-sm"
           />
-          <div className="grid max-h-72 grid-cols-2 gap-2 overflow-y-auto sm:grid-cols-3">
+          {activeSlotIndex === null ? (
+            <p className="text-xs text-neutral-500">先點右邊的格子，再從這裡點選要放入的商品。</p>
+          ) : (
+            <p className="text-xs text-neutral-500">
+              已選第 {activeSlotIndex + 1} 格，點下面的商品放入這一格。
+            </p>
+          )}
+          <div className="flex max-h-[28rem] flex-col gap-1 overflow-y-auto md:max-h-[32rem]">
             {pickerOptions.length === 0 ? (
-              <p className="col-span-full text-sm text-neutral-500">沒有可選的商品（只能選已擁有/虛擬收藏，且同一件商品不能重複放入同一本收納冊）</p>
+              <p className="text-sm text-neutral-500">
+                沒有可選的商品（只能選已擁有/虛擬收藏，且同一件商品不能重複放入同一本收納冊）
+              </p>
             ) : (
               pickerOptions.map((o) => (
                 <button
                   key={o.userCollectionId}
                   type="button"
-                  disabled={busy}
+                  disabled={activeSlotIndex === null || busy}
                   onClick={() => handlePickProduct(o.userCollectionId)}
-                  className="rounded border border-neutral-200 p-2 text-left text-xs hover:border-neutral-500 disabled:opacity-50"
+                  className="rounded border border-neutral-200 px-3 py-2 text-left text-xs hover:border-neutral-500 disabled:opacity-40"
                 >
                   {o.product.name}
                 </button>
               ))
             )}
           </div>
+        </aside>
+
+        <div className="flex-1">
+          {pages.length === 0 ? (
+            <div className="rounded border border-dashed border-neutral-300 p-8 text-center">
+              <p className="mb-4 text-sm text-neutral-500">這本收納冊還沒有任何頁面。</p>
+              <LayoutPicker onPick={handleAddPage} disabled={busy} />
+            </div>
+          ) : (
+            <>
+              <div className="flex items-center justify-between text-sm">
+                <button
+                  type="button"
+                  disabled={pageIdx === 0}
+                  onClick={() => setPageIdx((i) => Math.max(0, i - 1))}
+                  className="disabled:opacity-30"
+                >
+                  ← 上一頁
+                </button>
+                <span>
+                  第 {pageIdx + 1} / {pages.length} 頁
+                </span>
+                <button
+                  type="button"
+                  disabled={pageIdx === pages.length - 1}
+                  onClick={() => setPageIdx((i) => Math.min(pages.length - 1, i + 1))}
+                  className="disabled:opacity-30"
+                >
+                  下一頁 →
+                </button>
+              </div>
+
+              {template && (
+                <div
+                  className="mt-4 grid gap-3"
+                  style={{ gridTemplateColumns: `repeat(${template.cols}, minmax(0, 1fr))` }}
+                >
+                  {Array.from({ length: template.slots }, (_, i) => {
+                    const filled = slotAt(i);
+                    const isActive = activeSlotIndex === i;
+                    return (
+                      <div key={i} className="relative aspect-square">
+                        <button
+                          type="button"
+                          onClick={() => setActiveSlotIndex(i)}
+                          className={`flex h-full w-full flex-col items-center justify-center gap-1 overflow-hidden rounded border p-2 text-center hover:border-neutral-500 ${
+                            isActive ? 'border-2 border-neutral-900' : 'border-neutral-300'
+                          }`}
+                        >
+                          {filled?.photoUrl ? (
+                            // eslint-disable-next-line @next/next/no-img-element
+                            <img
+                              src={filled.photoUrl}
+                              alt={filled.product?.name ?? ''}
+                              className="h-full w-full object-cover"
+                            />
+                          ) : filled?.product ? (
+                            <span className="text-xs">{filled.product.name}</span>
+                          ) : (
+                            <span className="text-2xl text-neutral-300">+</span>
+                          )}
+                        </button>
+                        {filled?.product && (
+                          <button
+                            type="button"
+                            disabled={busy}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleClearSlot(i);
+                            }}
+                            className="absolute right-1 top-1 flex h-5 w-5 items-center justify-center rounded-full bg-neutral-900/70 text-xs text-white disabled:opacity-50"
+                            aria-label="移除這格"
+                          >
+                            ×
+                          </button>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+
+              <button
+                type="button"
+                onClick={() => setShowLayoutPicker((v) => !v)}
+                className="mt-4 self-start text-sm underline"
+              >
+                新增頁面
+              </button>
+              {showLayoutPicker && (
+                <div className="mt-3">
+                  <LayoutPicker onPick={handleAddPage} disabled={busy} />
+                </div>
+              )}
+            </>
+          )}
         </div>
-      )}
+      </div>
     </div>
   );
 }
