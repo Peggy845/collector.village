@@ -312,8 +312,8 @@ collector-village/
 - [x] 商品清單頁面（含篩選功能：依系列/角色/類別）
 - [x] 勾選收藏功能 + 收藏進度計算與顯示
 - [x] 玩家上傳照片功能（串接 Supabase Storage）—— 規格已定案（見「已定案項目 17」）
-- [ ] CSV 批次匯入商品資料的後台工具 —— 規格已定案（見「已定案項目 18」：本機腳本，非網頁後台介面）**← 目前最優先待辦，資料庫目前是空的**
-- [ ] 部署到 Vercel/Netlify（新 Next.js 專案尚未部署，Vercel 上目前還是舊的靜態佔位頁）
+- [x] CSV 批次匯入商品資料的後台工具 —— `scripts/import-products.mjs`（`npm run import:products`），已實際匯入 `products.csv` 400/402 筆（2筆因來源資料欄位錯位被自動跳過，見下方說明）
+- [ ] 部署到 Vercel/Netlify（新 Next.js 專案尚未部署，Vercel 上目前還是舊的靜態佔位頁）**← 目前最優先待辦**
 
 ### 資料庫 SQL（已定案，可直接交給 Claude Code）
 
@@ -433,14 +433,23 @@ CREATE TABLE user_collections (
 | `/settings` | 暱稱、社群連結、改密碼、刪除帳號（需輸入確認字串，`/api/account/delete` 用 service role 清 Storage 照片後刪除 auth 使用者，DB 資料靠 FK cascade 自動清除） |
 | Header 導覽列 | 全站共用，依登入狀態顯示不同連結 |
 | `supabase/schema.sql` | 完整建表 SQL + RLS 政策 + `collection-photos` Storage bucket 設定，可重複執行 |
+| `scripts/import-products.mjs` | CSV 批次匯入腳本（`npm run import:products`），必填欄位檢查+重複偵測(系列+名稱+賞別)+內容規則警告(綜合標籤/分類清單外/日文殘留/價格格式)，執行後印出成功/跳過/警告報告 |
 
-驗證狀態：`npm run build`、`npx tsc --noEmit`、`npm run lint` 均通過；dev server 逐一路由 curl 測試無誤（受保護頁面未登入時正確 307 導向 `/login`）。
+驗證狀態：`npm run build`、`npx tsc --noEmit`、`npm run lint` 均通過；dev server 逐一路由 curl 測試無誤（受保護頁面未登入時正確 307 導向 `/login`）；`products.csv` 已實際匯入資料庫，`/browse` 顯示 400 件商品共 9 頁，`/products/1` 等詳情頁確認能正確顯示真實資料。
+
+### CSV 匯入結果（2026-07-28）
+
+- 成功匯入 400 筆，0 筆內容規則警告（代表先前人工清理過的資料品質不錯）。
+- **2 筆因來源 CSV 本身欄位錯位被自動跳過，尚未匯入**（不是腳本的 bug，是 `products.csv` 這兩列資料本身在 character_aliases 之後少打了值，導致後面欄位全部錯位）：
+  - 第41列「立體機動裝置 1/12 比例模型」（扭蛋 進擊的巨人～立體機動裝置～系列）
+  - 第66列「立體機動裝置 水壺」（USJ 日本環球影城～進擊的巨人THE REAL～系列）
+  - 修法：打開 `products.csv` 找到這兩列，把 manufacturer/official_price 欄位補上正確值（原始資料看起來分別是 BANDAI/¥500/2021-11-20 與 USJ/¥3200/2017-01-13），改好後重跑 `npm run import:products` 即可（腳本有重複偵測，其餘400筆不會被重複匯入）。
 
 ### 已知缺口 / 下一步待辦（依優先順序）
 
-1. **CSV 批次匯入腳本**（`scripts/` 目前是空的）—— 資料庫目前 0 筆商品資料，`/browse` 顯示「目前沒有符合條件的商品」，`/products/[id]` 一律 404。這是目前唯一擋住「實際測試收藏功能」的項目，規格見「已定案項目 18」，`collector-village-products-final.csv`（402筆）已經準備好可以匯入。
-2. **確認 Supabase Storage bucket 是否已建立**：`supabase/schema.sql` 底部有 `insert into storage.buckets (...)`，理論上執行 schema.sql 時會一併建立 `collection-photos` bucket；如果照片上傳功能實測失敗，先去 Supabase Dashboard > Storage 確認 bucket 存在。
-3. **部署到 Vercel**：目前 Vercel 上的網址還連著舊的靜態佔位頁 repo，新 Next.js 專案尚未部署，需要另外設定 Vercel 專案（含環境變數：`NEXT_PUBLIC_SUPABASE_URL`、`NEXT_PUBLIC_SUPABASE_ANON_KEY`、`SUPABASE_SERVICE_ROLE_KEY`）。
+1. **部署到 Vercel**：目前 Vercel 上的網址還連著舊的靜態佔位頁 repo，新 Next.js 專案尚未部署，需要另外設定 Vercel 專案（含環境變數：`NEXT_PUBLIC_SUPABASE_URL`、`NEXT_PUBLIC_SUPABASE_ANON_KEY`、`SUPABASE_SERVICE_ROLE_KEY`）。
+2. 修正上述 2 筆錯位資料並重新匯入（非急迫，屬於資料完整性小尾巴）。
+3. **確認 Supabase Storage bucket 是否已建立**：`supabase/schema.sql` 底部有 `insert into storage.buckets (...)`，理論上執行 schema.sql 時會一併建立 `collection-photos` bucket；如果照片上傳功能實測失敗，先去 Supabase Dashboard > Storage 確認 bucket 存在。
 4. 商品清單頁 pagination 目前每頁 48 筆，資料量變大後可視需要調整。
 
 ---
