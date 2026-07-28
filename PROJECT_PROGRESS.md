@@ -14,9 +14,12 @@
 
 ---
 
-## 目前狀態：規劃階段（佔位頁面已上線，尚未開始正式開發）
+## 目前狀態：Claude Code 開發階段（核心頁面已建置完成，尚未匯入商品資料、尚未部署正式版）
 
-**目前網址**：https://collector-village-nine.vercel.app/（Vercel 免費子網域，`nine` 是自動加的字尾，之後可在 Vercel 專案設定改名）
+**目前網址**：https://collector-village-nine.vercel.app/（Vercel 免費子網域，目前連的還是舊的靜態佔位頁 repo，尚未指向新的 Next.js 專案，`nine` 是自動加的字尾，之後可在 Vercel 專案設定改名）
+**本機專案路徑**：`C:\Users\Peggy\Downloads\Collecter.village.code`（Next.js + Supabase，已於 2026-07-28 commit 進 git）
+
+> 詳細的「已完成頁面清單」與「下一步待辦」見文件最下方新增的「## 🖥️ Claude Code 開發進度」區塊，每次跟 Claude Code 討論完新進度都回來更新那一節即可，不需要重看整份規劃文件。
 
 ---
 
@@ -303,14 +306,14 @@ collector-village/
 
 > 這些是需要實際寫程式/建置環境的部分，先在這裡列出規格，等規劃階段全部完成後，一次性交給 Claude Code 執行。
 
-- [ ] 初始化 Next.js 專案 + 資料夾結構
-- [ ] 建立 Supabase 專案，依照下方 SQL schema 建表
-- [ ] 使用者註冊/登入功能（可用 Supabase Auth）—— 規格已定案（見「已定案項目 19」：Email+密碼、不做OAuth、開啟信箱驗證）
-- [ ] 商品清單頁面（含篩選功能：依系列/角色/類別）
-- [ ] 勾選收藏功能 + 收藏進度計算與顯示
-- [ ] 玩家上傳照片功能（串接 Supabase Storage）—— 規格已定案（見「已定案項目 17」）
-- [ ] CSV 批次匯入商品資料的後台工具 —— 規格已定案（見「已定案項目 18」：本機腳本，非網頁後台介面）
-- [ ] 部署到 Vercel/Netlify
+- [x] 初始化 Next.js 專案 + 資料夾結構
+- [x] 建立 Supabase 專案，依照下方 SQL schema 建表（`supabase/schema.sql`，含 RLS 政策與 Storage bucket）
+- [x] 使用者註冊/登入功能（可用 Supabase Auth）—— 規格已定案（見「已定案項目 19」：Email+密碼、不做OAuth、開啟信箱驗證）
+- [x] 商品清單頁面（含篩選功能：依系列/角色/類別）
+- [x] 勾選收藏功能 + 收藏進度計算與顯示
+- [x] 玩家上傳照片功能（串接 Supabase Storage）—— 規格已定案（見「已定案項目 17」）
+- [ ] CSV 批次匯入商品資料的後台工具 —— 規格已定案（見「已定案項目 18」：本機腳本，非網頁後台介面）**← 目前最優先待辦，資料庫目前是空的**
+- [ ] 部署到 Vercel/Netlify（新 Next.js 專案尚未部署，Vercel 上目前還是舊的靜態佔位頁）
 
 ### 資料庫 SQL（已定案，可直接交給 Claude Code）
 
@@ -409,6 +412,36 @@ CREATE TABLE user_collections (
 - [x] 建立 GitHub repo + 上傳佔位首頁
 - [x] 串接 Vercel 並成功部署，取得免費子網域網址
 - [x] 商品分類系統定案（大分類/細分類 + 賞別/製造商/圖片連結欄位設計）
+
+---
+
+## 🖥️ Claude Code 開發進度（2026-07-28 更新）
+
+> 這一節專門記錄「程式碼實際做到哪」，跟上面的「規劃討論紀錄」分開。每次請 Claude Code 做完新功能，回來更新這節就好，不用整份文件都重看。
+
+### 已完成頁面/功能
+
+| 路徑 | 說明 |
+|---|---|
+| `/`（首頁） | 專案簡介 + 精選商品 + 註冊/登入 CTA |
+| `/login`、`/register`、`/forgot-password`、`/reset-password`、`/auth/callback` | Email+密碼登入註冊、忘記密碼、Supabase Auth 回呼 |
+| `/browse` | 收藏庫瀏覽，含篩選面板（作品/系列/大小分類/賞別/角色）+ 分頁 |
+| `/products/[id]` | 商品詳情頁：標記已擁有/虛擬收藏/想要、編輯備註+入手日期、上傳照片（前端自動壓縮長邊至1600px再傳 Supabase Storage） |
+| `/town` | 小鎮總覽（登入後首頁）：圖書館(=dashboard)、家(=browse/wishlist) 可進入，工廠/超市/市集/服飾店灰階佔位 |
+| `/dashboard` | 我的收藏紀錄：全站(開放集合,原始數字)/依系列(封閉集合,%)/依角色(開放集合,原始數字) 三層統計，實體與虛擬分開顯示 |
+| `/wishlist` | 想要清單，重用 browse 的 ProductCard，篩選 `owned_status='wanted'` |
+| `/settings` | 暱稱、社群連結、改密碼、刪除帳號（需輸入確認字串，`/api/account/delete` 用 service role 清 Storage 照片後刪除 auth 使用者，DB 資料靠 FK cascade 自動清除） |
+| Header 導覽列 | 全站共用，依登入狀態顯示不同連結 |
+| `supabase/schema.sql` | 完整建表 SQL + RLS 政策 + `collection-photos` Storage bucket 設定，可重複執行 |
+
+驗證狀態：`npm run build`、`npx tsc --noEmit`、`npm run lint` 均通過；dev server 逐一路由 curl 測試無誤（受保護頁面未登入時正確 307 導向 `/login`）。
+
+### 已知缺口 / 下一步待辦（依優先順序）
+
+1. **CSV 批次匯入腳本**（`scripts/` 目前是空的）—— 資料庫目前 0 筆商品資料，`/browse` 顯示「目前沒有符合條件的商品」，`/products/[id]` 一律 404。這是目前唯一擋住「實際測試收藏功能」的項目，規格見「已定案項目 18」，`collector-village-products-final.csv`（402筆）已經準備好可以匯入。
+2. **確認 Supabase Storage bucket 是否已建立**：`supabase/schema.sql` 底部有 `insert into storage.buckets (...)`，理論上執行 schema.sql 時會一併建立 `collection-photos` bucket；如果照片上傳功能實測失敗，先去 Supabase Dashboard > Storage 確認 bucket 存在。
+3. **部署到 Vercel**：目前 Vercel 上的網址還連著舊的靜態佔位頁 repo，新 Next.js 專案尚未部署，需要另外設定 Vercel 專案（含環境變數：`NEXT_PUBLIC_SUPABASE_URL`、`NEXT_PUBLIC_SUPABASE_ANON_KEY`、`SUPABASE_SERVICE_ROLE_KEY`）。
+4. 商品清單頁 pagination 目前每頁 48 筆，資料量變大後可視需要調整。
 
 ---
 
