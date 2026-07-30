@@ -20,7 +20,7 @@ const KNOWN_CATEGORY_GROUPS = new Set([
 ]);
 
 const CSV_COLUMNS = [
-  'ip_name', 'series_name', 'series_year', 'product_name', 'category_group',
+  '商品編號', 'ip_name', 'series_name', 'series_year', 'product_name', 'category_group',
   'category', 'kuji_prize_tier', 'characters', 'character_aliases',
   'manufacturer', 'official_price', 'release_date', 'tags', 'image_url', 'source_url',
 ];
@@ -163,6 +163,7 @@ async function main() {
     const rowNum = i + 2; // +1 header, +1 1-indexed
     const get = (name) => (cols[colIndex[name]] ?? '').trim();
 
+    const productCode = get('商品編號');
     const ipName = get('ip_name');
     const seriesName = get('series_name');
     const seriesYear = get('series_year');
@@ -218,6 +219,7 @@ async function main() {
     const seriesId = await resolveSeriesId(ipId, seriesName, seriesYear);
 
     toInsert.push({
+      product_code: productCode ? Number(productCode) : null,
       ip_id: ipId,
       series_id: seriesId,
       name: productName,

@@ -49,6 +49,7 @@ export default function CollectionControls({
   const [saving, setSaving] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [agreedToUploadTerms, setAgreedToUploadTerms] = useState(false);
 
   async function handleSetStatus(next: OwnedStatus) {
     setError(null);
@@ -102,6 +103,10 @@ export default function CollectionControls({
     const file = event.target.files?.[0];
     event.target.value = '';
     if (!file) return;
+    if (!agreedToUploadTerms) {
+      setError('請先勾選確認事項再上傳照片');
+      return;
+    }
     if (file.size > 5 * 1024 * 1024) {
       setError('照片檔案需小於 5MB');
       return;
@@ -212,9 +217,26 @@ export default function CollectionControls({
           // eslint-disable-next-line @next/next/no-img-element
           <img src={photoUrl} alt="收藏照片" className="max-h-64 w-auto rounded object-contain" />
         )}
+        <p className="text-base font-bold text-red-700">
+          僅限上傳自己實際拍攝的實體商品照片，不可使用官方圖片、海報掃描、電繪／描圖等平面美術重製方式。
+        </p>
+        <label className="flex items-start gap-2 text-sm">
+          <input
+            type="checkbox"
+            checked={agreedToUploadTerms}
+            onChange={(e) => setAgreedToUploadTerms(e.target.checked)}
+            className="mt-0.5"
+          />
+          <span>我確認這是我自己實體拍攝的照片，並同意本站得於服務範圍內使用、顯示此照片。</span>
+        </label>
         <label className="flex flex-col gap-1 text-sm">
           <span className="text-neutral-500">上傳照片（jpg/png/webp，單檔上限 5MB，會自動壓縮）</span>
-          <input type="file" accept="image/jpeg,image/png,image/webp" onChange={handlePhotoChange} disabled={uploading} />
+          <input
+            type="file"
+            accept="image/jpeg,image/png,image/webp"
+            onChange={handlePhotoChange}
+            disabled={uploading || !agreedToUploadTerms}
+          />
         </label>
         {uploading && <p className="text-xs text-neutral-500">上傳中…</p>}
       </div>

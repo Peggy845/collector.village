@@ -37,6 +37,8 @@ create table if not exists public.series (
 -- =========================================
 create table if not exists public.products (
   id serial primary key,
+  product_code int unique,                   -- 對應 products.csv「商品編號」欄，供人工校對CSV時用編號比對回同一筆資料，
+                                              -- 不受日後修正文字內容影響（見 PROJECT_PROGRESS.md「待討論」第1項）
   ip_id int references public.ips(id),
   series_id int references public.series(id),
   name text not null,                        -- 商品名稱（不含系列名）
@@ -53,6 +55,10 @@ create table if not exists public.products (
   tags text[],
   created_at timestamp default now()
 );
+
+-- products 表已於先前版本建立、無 product_code 欄位時，此處補上（重複執行安全跳過）
+alter table public.products add column if not exists product_code int;
+create unique index if not exists products_product_code_key on public.products(product_code);
 
 -- =========================================
 -- 4. users（對應 Supabase Auth 使用者的公開資料）
