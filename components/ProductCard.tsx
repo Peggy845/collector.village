@@ -1,5 +1,6 @@
 import Link from 'next/link';
 import StatusBadge from './StatusBadge';
+import { getOfficialProductPhotoUrl } from '@/lib/supabase/storage';
 import type { ProductWithRelations } from '@/lib/supabase/products';
 import type { OwnedStatus } from '@/types/database';
 
@@ -10,11 +11,17 @@ export default function ProductCard({
   product: ProductWithRelations;
   ownedStatus?: OwnedStatus;
 }) {
+  const photoUrl = product.official_photo_path ? getOfficialProductPhotoUrl(product.official_photo_path) : null;
+
   return (
     <Link
       href={`/products/${product.id}`}
       className="flex flex-col gap-2 rounded-lg border border-neutral-200 p-4 transition hover:border-neutral-400"
     >
+      {photoUrl && (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img src={photoUrl} alt={product.name} className="h-32 w-full rounded object-cover" />
+      )}
       <div className="flex items-start justify-between gap-2">
         <h3 className="text-sm font-medium">{product.name}</h3>
         {ownedStatus && <StatusBadge status={ownedStatus} />}

@@ -31,6 +31,7 @@ export interface Product {
   source_url: string | null;
   release_date: string | null;
   tags: string[] | null;
+  official_photo_path: string | null;
   created_at: string;
 }
 
@@ -97,5 +98,23 @@ export interface ProductSubmission {
   release_date: string | null;
   tags: string[] | null;
   status: SubmissionStatus;
+  created_at: string;
+}
+
+export interface ProductPhotoSubmission {
+  id: number;
+  product_id: number;
+  submitted_by: string;
+  photo_path: string;
+  status: SubmissionStatus;
+  reviewed_at: string | null;
+  created_at: string;
+}
+
+export interface GameCurrencyLedgerEntry {
+  id: number;
+  user_id: string;
+  amount: number;
+  reason: string | null;
   created_at: string;
 }

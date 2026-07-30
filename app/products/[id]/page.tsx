@@ -4,8 +4,10 @@ import Link from 'next/link';
 import { createClient } from '@/lib/supabase/server';
 import { fetchProductById } from '@/lib/supabase/products';
 import { fetchUserCollectionForProduct } from '@/lib/supabase/collections';
-import { getCollectionPhotoSignedUrl } from '@/lib/supabase/storage';
+import { fetchMyPhotoSubmission } from '@/lib/supabase/photo-submissions';
+import { getCollectionPhotoSignedUrl, getOfficialProductPhotoUrl } from '@/lib/supabase/storage';
 import CollectionControls from './CollectionControls';
+import PhotoContributionControls from './PhotoContributionControls';
 
 export const metadata: Metadata = {
   robots: { index: false, follow: false }, // 商品詳情頁設為 noindex，見 PROJECT_PROGRESS.md 第25項
@@ -31,11 +33,22 @@ export default async function ProductDetailPage({ params }: ProductDetailPagePro
   const entry = user ? await fetchUserCollectionForProduct(supabase, user.id, productId) : null;
   const photoUrl = entry?.photo_url ? await getCollectionPhotoSignedUrl(supabase, entry.photo_url) : null;
 
+  const officialPhotoUrl = product.official_photo_path
+    ? getOfficialProductPhotoUrl(product.official_photo_path)
+    : null;
+  const myPhotoSubmission =
+    user && !product.official_photo_path ? await fetchMyPhotoSubmission(supabase, user.id, productId) : null;
+
   return (
     <main className="mx-auto flex w-full max-w-3xl flex-1 flex-col gap-6 px-4 py-10">
       <Link href="/browse" className="text-sm text-neutral-500 underline">
         ← 返回收藏庫瀏覽
       </Link>
+
+      {officialPhotoUrl && (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img src={officialPhotoUrl} alt={product.name} className="max-h-96 w-auto rounded object-contain" />
+      )}
 
       <div className="flex flex-col gap-3">
         <h1 className="text-2xl font-semibold">{product.name}</h1>
@@ -107,6 +120,10 @@ export default async function ProductDetailPage({ params }: ProductDetailPagePro
           </Link>
           後即可標記擁有狀態、寫備註、上傳照片。
         </p>
+      )}
+
+      {user && !product.official_photo_path && (
+        <PhotoContributionControls productId={productId} userId={user.id} initialSubmission={myPhotoSubmission} />
       )}
     </main>
   );

@@ -53,12 +53,15 @@ create table if not exists public.products (
   source_url text,                           -- 僅供後台管理者使用，不對玩家顯示
   release_date date,
   tags text[],
+  official_photo_path text,                  -- 全站公開顯示的公版代表照 Storage 路徑（見「已定案項目 30」），
+                                              -- 與上面 image_url（僅後台使用）明確分開，只有這個欄位對玩家可見
   created_at timestamp default now()
 );
 
 -- products 表已於先前版本建立、無 product_code 欄位時，此處補上（重複執行安全跳過）
 alter table public.products add column if not exists product_code int;
 create unique index if not exists products_product_code_key on public.products(product_code);
+alter table public.products add column if not exists official_photo_path text;
 
 -- =========================================
 -- 4. users（對應 Supabase Auth 使用者的公開資料）
@@ -164,6 +167,35 @@ create table if not exists public.product_submissions (
 );
 
 -- =========================================
+-- 8. product_photo_submissions（玩家互助補圖，見「已定案項目 30」）
+-- =========================================
+-- v1 規則：只在該商品 products.official_photo_path 為空時，前端才會開放提交；
+-- 一旦有商品已核准公版圖，不再開放其他候選圖取代（避免比較心態，見第12-1項），此規則由應用層把關，
+-- 資料庫層不特別限制（審核者仍可依實際情況決定）。
+create table if not exists public.product_photo_submissions (
+  id serial primary key,
+  product_id int references public.products(id) on delete cascade not null,
+  submitted_by uuid references public.users(id) on delete cascade not null,
+  photo_path text not null,                  -- product-photo-pending bucket 內路徑，格式 submitted_by/product_id/檔名
+  status text default 'pending',             -- 'pending' / 'approved' / 'rejected'
+  reviewed_at timestamp,
+  created_at timestamp default now()
+);
+
+-- =========================================
+-- 9. game_currency_ledger（遊戲幣帳本，見「已定案項目 10-1」）
+-- =========================================
+-- 採「帳本」而非「餘額欄位」設計：只累加不修改，加總 amount 即為餘額，
+-- 遊戲幣系統本身尚未正式建置前，先用這張表記錄玩家應得的獎勵，避免漏算（見第30項）。
+create table if not exists public.game_currency_ledger (
+  id serial primary key,
+  user_id uuid references public.users(id) on delete cascade not null,
+  amount int not null,                       -- 正數為獲得，負數為花費（花費機制尚未設計，目前只會有正數）
+  reason text,                               -- 例如 'photo_submission_approved:product_id=123'
+  created_at timestamp default now()
+);
+
+-- =========================================
 -- Row Level Security
 -- =========================================
 
@@ -176,6 +208,8 @@ alter table public.collection_albums enable row level security;
 alter table public.album_pages enable row level security;
 alter table public.album_slots enable row level security;
 alter table public.product_submissions enable row level security;
+alter table public.product_photo_submissions enable row level security;
+alter table public.game_currency_ledger enable row level security;
 
 -- ips / series / products：所有人（含未登入訪客）可讀，寫入僅限 service role（此處不建任何 insert/update/delete policy，
 -- 一般角色因此無法寫入；service role 預設會繞過 RLS，供 scripts/ 內的匯入腳本使用）
@@ -310,6 +344,23 @@ create policy "own submissions select" on public.product_submissions for select 
 drop policy if exists "own submissions insert" on public.product_submissions;
 create policy "own submissions insert" on public.product_submissions for insert with check (auth.uid() = submitted_by);
 
+-- product_photo_submissions：使用者可新增、查看、撤回自己「待審核」的提交；審核（approved/rejected）僅限 service role 腳本
+drop policy if exists "own photo submissions select" on public.product_photo_submissions;
+create policy "own photo submissions select" on public.product_photo_submissions
+  for select using (auth.uid() = submitted_by);
+
+drop policy if exists "own photo submissions insert" on public.product_photo_submissions;
+create policy "own photo submissions insert" on public.product_photo_submissions
+  for insert with check (auth.uid() = submitted_by);
+
+drop policy if exists "own photo submissions delete pending" on public.product_photo_submissions;
+create policy "own photo submissions delete pending" on public.product_photo_submissions
+  for delete using (auth.uid() = submitted_by and status = 'pending');
+
+-- game_currency_ledger：使用者只能查看自己的帳本紀錄，寫入僅限 service role（審核腳本發放獎勵）
+drop policy if exists "own ledger select" on public.game_currency_ledger;
+create policy "own ledger select" on public.game_currency_ledger for select using (auth.uid() = user_id);
+
 -- =========================================
 -- Storage：collection-photos bucket
 -- =========================================
@@ -337,3 +388,33 @@ create policy "own photos update" on storage.objects for update
 drop policy if exists "own photos delete" on storage.objects;
 create policy "own photos delete" on storage.objects for delete
   using (bucket_id = 'collection-photos' and (storage.foldername(name))[1] = auth.uid()::text);
+
+-- =========================================
+-- Storage：product-photo-pending / product-photos bucket（玩家互助補圖，見「已定案項目 30」）
+-- =========================================
+-- product-photo-pending：private，玩家提交的候選圖審核前只有本人與 service role（審核腳本）看得到，
+-- 路徑規則 submitted_by/product_id/檔名，比照 collection-photos 的路徑慣例
+-- product-photos：public，審核通過後的正式公版代表照，全站玩家皆可讀，只有 service role（審核腳本）能寫入
+
+insert into storage.buckets (id, name, public)
+values ('product-photo-pending', 'product-photo-pending', false)
+on conflict (id) do nothing;
+
+insert into storage.buckets (id, name, public)
+values ('product-photos', 'product-photos', true)
+on conflict (id) do nothing;
+
+drop policy if exists "own pending photo submissions select" on storage.objects;
+create policy "own pending photo submissions select" on storage.objects for select
+  using (bucket_id = 'product-photo-pending' and (storage.foldername(name))[1] = auth.uid()::text);
+
+drop policy if exists "own pending photo submissions insert" on storage.objects;
+create policy "own pending photo submissions insert" on storage.objects for insert
+  with check (bucket_id = 'product-photo-pending' and (storage.foldername(name))[1] = auth.uid()::text);
+
+drop policy if exists "own pending photo submissions delete" on storage.objects;
+create policy "own pending photo submissions delete" on storage.objects for delete
+  using (bucket_id = 'product-photo-pending' and (storage.foldername(name))[1] = auth.uid()::text);
+
+-- product-photos 是 public bucket，讀取不需要政策（Supabase 對 public bucket 預設開放 select）；
+-- 寫入只由 service role 執行的審核腳本進行，一般角色不需要、也沒有 insert/update policy
