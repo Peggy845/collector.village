@@ -35,9 +35,9 @@ MVP 只做：收藏庫瀏覽 + 勾選擁有 + 篩選 + 收藏進度顯示。
 - 這個決策同時解決了原架構圖裡「侵權」「儲存空間」「商品圖授權」三個卡住的問題。
 - **補充確認（2026-07-30）：掃描海報等平面美術品，等同直接複製官方美術，風險比照官網圖片，不能當作「像自己拍照」的低風險替代方案。** 只有拍攝自己實際擁有的立體實物（公仔本體等）才算低風險的使用者自產內容。此原則已反映在上傳照片介面的提醒文字與授權勾選（見第17項）。
 
-### 3. 資料庫欄位設計（已完成 schema，待 Claude Code 建置）
-表格：`ips`、`series`、`products`、`users`、`user_collections`
-（完整 SQL 定義見下方「待 Claude Code 生成」區塊，已經寫好可以直接拿去用）
+### 3. 資料庫欄位設計（已建置上線）
+表格：`ips`、`series`、`products`、`users`、`user_collections`、`collection_albums`、`album_pages`、`album_slots`、`product_submissions`
+（完整、最新的 SQL 定義與 RLS 政策請見 `supabase/schema.sql`，該檔案可重複執行、隨欄位變動持續更新，此文件不再重複貼一份容易過時的複本；欄位設計背後的討論脈絡仍記錄在本節與下方各項）
 
 商品分類（大分類 → 細分類，依粉絲角度整理，可再調整）：
 - 立體公仔類：公仔、娃娃、立牌、抬頭娃、壓克力透卡
@@ -337,122 +337,6 @@ collector-village/
 
 ---
 
-## 🔲 待完成項目（可以用對話型 AI 先做完，不需要 Claude Code）
-
-- [x] 《進擊的巨人》商品資料整理成 CSV —— 已產出 `collector-village-products-final.csv`（402筆乾淨資料），可交給 Claude Code 匯入使用。舊試爬資料（Attack_on_Titan_2019_V2_ALL.xlsx 31筆、萬代一番賞.xlsx 61筆）與此次清理過程中移除的19筆有問題資料，皆未納入最終版本，遺漏部分依第20項「官方商品回報流程」交由玩家陸續回報補足即可，不強求一次到位
-- [x] 網站頁面結構規劃 —— 見下方「已定案項目 13」
-- [x] UI 文字/介面用語整理 —— 見「已定案項目 16」
-- [x] 收藏進度計算邏輯規則 —— 見「已定案項目 12」
-- [x] 使用者流程圖 —— 見「已定案項目 15」
-- [x] 專案資料夾結構規劃 —— 見「已定案項目 17」
-
----
-
-## 🤖 標記「之後請 Claude Code 生成」的項目
-
-> 這些是需要實際寫程式/建置環境的部分，先在這裡列出規格，等規劃階段全部完成後，一次性交給 Claude Code 執行。
-
-- [x] 初始化 Next.js 專案 + 資料夾結構
-- [x] 建立 Supabase 專案，依照下方 SQL schema 建表（`supabase/schema.sql`，含 RLS 政策與 Storage bucket）
-- [x] 使用者註冊/登入功能（可用 Supabase Auth）—— 規格已定案（見「已定案項目 19」：Email+密碼、不做OAuth、開啟信箱驗證）
-- [x] 商品清單頁面（含篩選功能：依系列/角色/類別）
-- [x] 勾選收藏功能 + 收藏進度計算與顯示
-- [x] 玩家上傳照片功能（串接 Supabase Storage）—— 規格已定案（見「已定案項目 17」）
-- [x] CSV 批次匯入商品資料的後台工具 —— `scripts/import-products.mjs`（`npm run import:products`），已實際匯入 `products.csv` 400/402 筆（2筆因來源資料欄位錯位被自動跳過，見下方說明）
-- [x] 部署到 Vercel —— `https://collector-village-nine.vercel.app/` 已是正式版，過程中踩到一個雷見下方「部署踩雷記錄」
-- [x] 「我的收納冊」功能（新頁面 `/albums`）—— 規格已定案（見「已定案項目 29」），含 `collection_albums`/`album_pages`/`album_slots` 三張新表、固定版面模板、簡化版分享連結機制，已於 2026-07-28 開發完成並部署上線（見「Claude Code 開發進度」區塊）
-
-### 資料庫 SQL（已定案，可直接交給 Claude Code）
-
-```sql
-CREATE TABLE ips (
-  id SERIAL PRIMARY KEY,
-  name TEXT NOT NULL,
-  type TEXT
-);
-
-CREATE TABLE series (
-  id SERIAL PRIMARY KEY,
-  ip_id INT REFERENCES ips(id),
-  name TEXT,
-  release_year INT
-);
-
-CREATE TABLE products (
-  id SERIAL PRIMARY KEY,
-  ip_id INT REFERENCES ips(id),              -- 作品名稱
-  series_id INT REFERENCES series(id),       -- 所屬系列/一番賞活動名稱
-  name TEXT NOT NULL,                        -- 商品名稱（不含系列名，系列名另存 series）
-  characters TEXT[],                         -- 主要角色標籤（畫面上出現的每個角色都填，不因戲份少而省略，用於篩選UI）
-  character_aliases TEXT[],                  -- 角色別名/暱稱標籤（如 團長漢吉、戰損漢吉），輔助搜尋用，不進篩選清單，允許粉絲後續補充
-  category TEXT,                             -- 細分類（公仔、鑰匙圈...）
-  category_group TEXT,                       -- 大分類（立體公仔類、配戴隨身類、包袋類、服裝類、生活雜貨類、紙製/影像類、影音類、出版品類、布娃娃類...持續擴充）
-  kuji_prize_tier TEXT,                      -- 賞別，例如 'A賞'、'C賞'，非一番賞商品留空
-  manufacturer TEXT,                         -- 製造商（萬代、Sega、GoodSmile...）
-  official_price TEXT,                       -- 官方定價，存顯示字串，例如 '¥780'、'NT$250'、'非賣品'（不寫「円」「元」）
-  image_url TEXT,                            -- 參考圖片網址（僅存外部連結，不下載重製）
-  source_url TEXT,                           -- 商品來源網址（官網/店家頁面），需為該商品實際頁面，寧可留空不可放錯連結
-  release_date DATE,
-  tags TEXT[],                               -- 標籤，例如 一番賞、萬代、最終季、電影、番外
-  created_at TIMESTAMP DEFAULT now()
-);
-
-CREATE TABLE users (
-  id SERIAL PRIMARY KEY,
-  username TEXT UNIQUE,
-  email TEXT UNIQUE,
-  password_hash TEXT,
-  created_at TIMESTAMP DEFAULT now()
-);
-
-CREATE TABLE user_collections (
-  id SERIAL PRIMARY KEY,
-  user_id INT REFERENCES users(id),
-  product_id INT REFERENCES products(id),
-  owned_status TEXT DEFAULT 'owned_real',    -- 狀態值：'owned_real'（實體真的擁有）、'owned_virtual'（虛擬擁有，如買不起的GK等夢幻逸品）、'wanted'（想要清單，尚未擁有）
-  owned_type TEXT,
-  photo_url TEXT,
-  note TEXT,                                 -- 泛用備註，玩家自由填寫（含價格觀察、購入緣由等），僅存於個人資料，不影響其他玩家
-  acquired_date DATE,
-  created_at TIMESTAMP DEFAULT now(),
-  UNIQUE(user_id, product_id, owned_type)
-);
-
--- 以下三張表對應「已定案項目 29：我的收納冊功能」
-
-CREATE TABLE collection_albums (
-  id SERIAL PRIMARY KEY,
-  user_id INT REFERENCES users(id) NOT NULL,
-  name TEXT NOT NULL,                        -- 使用者自訂收納冊名稱，例如「巨人小卡收藏」
-  album_type TEXT,                           -- 收納櫃種類，如小卡收納櫃/徽章/海報，純文字分類用途，不限制可用版面模板
-  is_public BOOLEAN DEFAULT false,           -- 公開/私人開關，預設私人
-  share_token TEXT UNIQUE,                   -- 設為公開時產生的唯一亂碼字串，用於分享連結網址，私人時可為空
-  created_at TIMESTAMP DEFAULT now()
-);
-
-CREATE TABLE album_pages (
-  id SERIAL PRIMARY KEY,
-  album_id INT REFERENCES collection_albums(id) ON DELETE CASCADE NOT NULL,
-  page_number INT NOT NULL,                  -- 頁碼，決定左右翻頁順序
-  layout_type TEXT NOT NULL,                 -- 版面模板：'1','2h','2v','3h','3v','4','6','8','9'（h=橫向/水平排列，v=直向/垂直排列，僅2格3格有方向選擇）
-  created_at TIMESTAMP DEFAULT now()
-);
-
-CREATE TABLE album_slots (
-  id SERIAL PRIMARY KEY,
-  page_id INT REFERENCES album_pages(id) ON DELETE CASCADE NOT NULL,
-  slot_index INT NOT NULL,                   -- 格子在頁面中的順序位置（由左至右、由上至下）
-  user_collection_id INT REFERENCES user_collections(id), -- 對應放入的商品收藏紀錄，可為空表示空格
-  UNIQUE(page_id, slot_index)
-);
-
--- RLS 政策方向（實際語法待 Claude Code 依 Supabase Auth 慣例撰寫）：
--- collection_albums：SELECT 允許 user_id = auth.uid() 或 is_public = true；INSERT/UPDATE/DELETE 僅限 user_id = auth.uid()
--- album_pages / album_slots：比照上層 collection_albums 的公開/私人狀態與擁有者判斷（透過 album_id 關聯查詢）
-```
-
----
-
 ## 討論紀錄摘要（時間序）
 
 | 日期/次序 | 討論內容 | 結論 |
@@ -485,14 +369,6 @@ CREATE TABLE album_slots (
 | 第26次 | 小鎮總覽視覺概念+美術風格決策流程 | 新增「小鎮總覽」為登入後首頁，包裝既有頁面（圖書館=收藏總覽、家=收藏庫/想要清單），未來擴充建築（工廠/超市/市集/服飾店）以「看得到點不進去」方式先呈現，不超出MVP範圍；釐清資料夾/路由層級屬低成本可調整項目；定案美術風格分三階段處理（MVP先用平面圖示風格，不現在決定最終風格） |
 | 第27次 | 「我的收納冊」功能討論（wireframe手繪圖） | 定位為新增獨立頁面，不取代`/browse`；曾考慮「小屋保險箱/書櫃」空間視覺化分享方式，因等同重做已排除的小屋訪問系統且易誘發比較心態而否決，改採沿用第16項分享連結機制的簡化版（每本收納冊可設公開/私人，公開產生唯讀連結，不做探索廣場頁）；格數採固定套用現實小卡冊規格（1/2/3/4/6/8/9格），不做自由拖拉排版；資料庫新增collection_albums/album_pages/album_slots三表；規劃完成，待整理成Claude Code開發指令 |
 | 第28次 | 玩家互助補圖功能定案（v1） | 定案 v1 核心簡化規則：只在商品完全沒有公版代表照時開放玩家提交候選圖，已有公版圖後不開放取代，避免比較心態與審核負擔（呼應12-1）；審核比照第20項模式（Table Editor人工審核，不建UI）；站長自己上傳免審核；通過審核可獲10枚遊戲幣獎勵，但遊戲幣系統本身仍屬第10項已排除範疇，尚待建置；上傳需授權公開展示（呼應第23項） |
-
----
-
-## ✅ 已完成的小任務（非規劃類）
-
-- [x] 建立 GitHub repo + 上傳佔位首頁
-- [x] 串接 Vercel 並成功部署，取得免費子網域網址
-- [x] 商品分類系統定案（大分類/細分類 + 賞別/製造商/圖片連結欄位設計）
 
 ---
 
@@ -567,18 +443,8 @@ Vercel 專案 `qa-clinic-taiwan/collector-village` 是沿用舊靜態佔位頁�
 
 ### 已知缺口 / 下一步待辦（依優先順序）
 
-1. ~~本機已 commit 但尚未 push~~ **已於 2026-07-28 push 並確認正式站部署成功**（收納冊功能、資料庫直連工具、首頁文案、Footer 聲明皆已上線，curl 驗證過首頁文案與 `/albums` 保護路由正常）。
-2. 修正 `products.csv` 中 2 筆錯位資料並重新匯入（非急迫，屬於資料完整性小尾巴，見上方「CSV 匯入結果」）。
-3. 商品清單頁 pagination 目前每頁 48 筆，資料量變大後可視需要調整。
-4. 目前 `collector-village-git-main-qa-clinic-taiwan.vercel.app` 這個分支別名網址有 Vercel Deployment Protection（會導到 SSO 登入頁），主要正式網址 `collector-village-nine.vercel.app` 不受影響，如不需要可忽略。
-5. **圖片儲存規劃已定案（2026-07-30，原「待討論」項目移入）**：大量商品圖片（光巨人可能上千張，之後還有其他IP）不進 git repo（避免 repo 體積暴增、撞 GitHub 檔案大小限制），沿用專案已在用的 Supabase Storage，不用另外接 Google 雲端硬碟。**等 Peggy 實際建立本機審核用資料夾、開始上傳圖片時**，記得把該資料夾加進 `.gitignore`；真正要在網站上顯示的圖片才上傳到 Supabase Storage，網站只存路徑/網址。
-6. **products.csv 資料審核流程已定案（2026-07-30，原「待討論」項目移入）**：Peggy 逐行校對時採「不刪除任何東西，審核確認沒問題的那一列剪下貼到CSV下方新區塊」的做法。**等 Peggy 上傳校對過的 CSV（出現「已審核」區塊）時**，需要幫 `scripts/import-products.mjs` 加上「依 `product_code` 比對、覆蓋更新既有資料列」的邏輯（目前腳本只會新增、不會更新既有資料），且只需處理「已審核」區塊裡的資料，不用重跑整份 CSV。`product_code` 欄位與現有400筆資料的回填已於2026-07-30完成（見上方「product_code 商品編號欄位」小節），這一步的前置準備已就緒。
-
----
-
-## 下一步建議
-
-從「待完成項目」清單中挑一項繼續往下細化。個人建議優先順序：
-1. 網站頁面結構規劃（讓你腦中有清楚畫面，之後跟 Claude Code 溝通更精準）
-2. 《進擊的巨人》商品資料 CSV 整理（工作量最大，可以拆多次慢慢做，現在欄位設計已經定案，可以直接照欄位填）
-3. 收藏進度計算邏輯規則
+1. 修正 `products.csv` 中 2 筆錯位資料並重新匯入（非急迫，屬於資料完整性小尾巴，見上方「CSV 匯入結果」）。
+2. 商品清單頁 pagination 目前每頁 48 筆，資料量變大後可視需要調整。
+3. 目前 `collector-village-git-main-qa-clinic-taiwan.vercel.app` 這個分支別名網址有 Vercel Deployment Protection（會導到 SSO 登入頁），主要正式網址 `collector-village-nine.vercel.app` 不受影響，如不需要可忽略。
+4. **圖片儲存規劃已定案（2026-07-30）**：大量商品圖片（光巨人可能上千張，之後還有其他IP）不進 git repo（避免 repo 體積暴增、撞 GitHub 檔案大小限制），沿用專案已在用的 Supabase Storage，不用另外接 Google 雲端硬碟。**等 Peggy 實際建立本機審核用資料夾、開始上傳圖片時**，記得把該資料夾加進 `.gitignore`；真正要在網站上顯示的圖片才上傳到 Supabase Storage，網站只存路徑/網址。
+5. **products.csv 資料審核流程已定案（2026-07-30）**：Peggy 逐行校對時採「不刪除任何東西，審核確認沒問題的那一列剪下貼到CSV下方新區塊」的做法。**等 Peggy 上傳校對過的 CSV（出現「已審核」區塊）時**，需要幫 `scripts/import-products.mjs` 加上「依 `product_code` 比對、覆蓋更新既有資料列」的邏輯（目前腳本只會新增、不會更新既有資料），且只需處理「已審核」區塊裡的資料，不用重跑整份 CSV。`product_code` 欄位與現有400筆資料的回填已於2026-07-30完成（見上方「product_code 商品編號欄位」小節），這一步的前置準備已就緒。
