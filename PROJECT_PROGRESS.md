@@ -530,6 +530,13 @@ CREATE TABLE album_slots (
   - 第66列「立體機動裝置 水壺」（USJ 日本環球影城～進擊的巨人THE REAL～系列）
   - 修法：打開 `products.csv` 找到這兩列，把 manufacturer/official_price 欄位補上正確值（原始資料看起來分別是 BANDAI/¥500/2021-11-20 與 USJ/¥3200/2017-01-13），改好後重跑 `npm run import:products` 即可（腳本有重複偵測，其餘400筆不會被重複匯入）。
 
+### product_code 商品編號欄位（2026-07-30 新增）
+
+- 背景：Peggy 打算之後逐行校對 `products.csv`，校對時可能順手修正錯字，若還是靠「系列+商品名稱+賞別」文字比對資料庫既有資料，改字後會對不上、被誤判成新商品。因此在校對開始前先建立穩定的編號比對機制。
+- `products` 表新增 `product_code int unique` 欄位（`supabase/schema.sql`），已套用到正式資料庫。
+- 執行一次性腳本 `scripts/backfill-product-codes.mjs`，依「系列+商品名稱+賞別」比對，把資料庫既有 400 筆商品回填對應的 CSV 商品編號：**400 筆全部成功回填、0 筆遺漏**（另 2 筆是上面提到的欄位錯位、尚未匯入的舊資料，之後修正重新匯入時會自動帶入編號，不需要另外處理）。
+- `scripts/import-products.mjs` 已同步更新，之後新匯入的商品都會一併寫入 `product_code`，但**目前腳本仍只會「新增」，沒有「依 product_code 覆蓋更新既有資料列」的功能**——這一步等 Peggy 完成第一輪校對後再實作（見「已知缺口」第6項）。
+
 ### 部署踩雷記錄（2026-07-28，供之後參考）
 
 Vercel 專案 `qa-clinic-taiwan/collector-village` 是沿用舊靜態佔位頁時代建立的專案，**Build and Deployment 設定裡 Framework Preset 卡在「Other」**（沒有自動偵測成 Next.js）。第一次 push 新 Next.js 專案上去時，Vercel 用「Other」模式建置，結果整個網站每個路徑都回應 Vercel 平台層級的 `404 NOT_FOUND`（不是我們 App 的 404 頁，是 Vercel 直接擋在前面，連 Runtime Logs 都沒有任何紀錄，因為根本沒有呼叫到任何 serverless function）。
@@ -564,24 +571,8 @@ Vercel 專案 `qa-clinic-taiwan/collector-village` 是沿用舊靜態佔位頁�
 2. 修正 `products.csv` 中 2 筆錯位資料並重新匯入（非急迫，屬於資料完整性小尾巴，見上方「CSV 匯入結果」）。
 3. 商品清單頁 pagination 目前每頁 48 筆，資料量變大後可視需要調整。
 4. 目前 `collector-village-git-main-qa-clinic-taiwan.vercel.app` 這個分支別名網址有 Vercel Deployment Protection（會導到 SSO 登入頁），主要正式網址 `collector-village-nine.vercel.app` 不受影響，如不需要可忽略。
-
----
-
-## 🗂️ 待討論／尚未決定（2026-07-28 新增，來自跟 Claude Code 的聊天）
-
-以下是討論過但還沒實作、之後要開始做這塊時記得回來完善的項目。
-
-### 1. products.csv 資料審核流程
-- 現有 400 筆資料可能有錯，Peggy 打算重新逐行檢查一次（尚未開始，Peggy 會自行找時間做）。
-- 採用的方法：**不刪除任何東西，在原本內容下方（例如第500行後）新增一個區塊，審核確認沒問題的那一列就剪下貼到後面**。之後 Claude Code 只需要看「後面區塊」有哪些商品就知道是審核過、可以拿去同步資料庫的。
-- **前置準備已完成（2026-07-30）**：`products.csv` 已有「商品編號」欄（1~402 依現有列順序流水編號）；`products` 表已加上 `product_code int unique` 欄位（`supabase/schema.sql` 第3節）；已執行 `scripts/backfill-product-codes.mjs`，把現有資料庫 400 筆商品依「系列+商品名稱+賞別」比對回填對應編號，**400 筆全部成功回填、0 筆遺漏**（另 2 筆是 CSV 裡本來就因欄位錯位尚未匯入的舊資料，見「已知缺口」第2項，之後修正重新匯入時會自動帶入編號）。`scripts/import-products.mjs` 也已同步更新，之後新匯入的商品會一併寫入 `product_code`。
-- 之後 Peggy 開始逐行校對、修正錯字時，不論文字內容怎麼改，都可以用這個編號準確比對回資料庫同一筆資料做覆蓋更新，不受文字比對失準影響。**尚未實作的部分**：目前腳本還是只會「新增」，沒有「依 product_code 覆蓋更新既有資料列」的功能，等 Peggy 校對出第一批要更新的資料再請 Claude Code 加這段邏輯即可，不用現在预先做。
-
-### 2. 圖片儲存規劃
-- 大量商品圖片（光巨人可能上千張，之後還有其他 IP）**不要放進專案資料夾跟著 git 走**，會讓 repo 體積暴增、clone/push 變慢，且撞到 GitHub 檔案大小限制。
-- 沿用專案已經在用的 Supabase Storage，不需要另外接 Google 雲端硬碟：
-  - 審核階段本機用來對照資料的圖：本機資料夾存放即可，加進 `.gitignore`，不需要進 git 版控。
-  - 真正要在網站上顯示的圖：上傳到 Supabase Storage，網站只存路徑/網址。
+5. **圖片儲存規劃已定案（2026-07-30，原「待討論」項目移入）**：大量商品圖片（光巨人可能上千張，之後還有其他IP）不進 git repo（避免 repo 體積暴增、撞 GitHub 檔案大小限制），沿用專案已在用的 Supabase Storage，不用另外接 Google 雲端硬碟。**等 Peggy 實際建立本機審核用資料夾、開始上傳圖片時**，記得把該資料夾加進 `.gitignore`；真正要在網站上顯示的圖片才上傳到 Supabase Storage，網站只存路徑/網址。
+6. **products.csv 資料審核流程已定案（2026-07-30，原「待討論」項目移入）**：Peggy 逐行校對時採「不刪除任何東西，審核確認沒問題的那一列剪下貼到CSV下方新區塊」的做法。**等 Peggy 上傳校對過的 CSV（出現「已審核」區塊）時**，需要幫 `scripts/import-products.mjs` 加上「依 `product_code` 比對、覆蓋更新既有資料列」的邏輯（目前腳本只會新增、不會更新既有資料），且只需處理「已審核」區塊裡的資料，不用重跑整份 CSV。`product_code` 欄位與現有400筆資料的回填已於2026-07-30完成（見上方「product_code 商品編號欄位」小節），這一步的前置準備已就緒。
 
 ---
 
