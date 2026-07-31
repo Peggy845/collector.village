@@ -1,15 +1,22 @@
 // 新增工廠系統的設計圖庫素材（見 PROJECT_PROGRESS.md 已定案項目 31：v1 由 Peggy 自行尋找可商用圖片，
 // 不開放玩家上傳）。上傳到 public bucket 並寫入 factory_designs 表，馬上就能在 /factory 選圖生產。
-// 用法：node --env-file=.env.local scripts/add-factory-design.mjs <本機圖片路徑> [顯示名稱]
+//
+// 用法：
+//   node --env-file=.env.local scripts/add-factory-design.mjs <本機圖片路徑> [顯示名稱]
+//   node --env-file=.env.local scripts/add-factory-design.mjs --text "顯示文字"
+//     （正式圖庫還沒準備好之前，先用純文字色塊佔位，前端沒有圖片時會自動改顯示這段文字）
 
 import { createClient } from '@supabase/supabase-js';
 import { readFileSync } from 'node:fs';
 import { extname, basename } from 'node:path';
 
-const [, , filePath, displayName] = process.argv;
+const [, , first, second] = process.argv;
 
-if (!filePath) {
-  console.error('用法：node --env-file=.env.local scripts/add-factory-design.mjs <本機圖片路徑> [顯示名稱]');
+if (!first) {
+  console.error(
+    '用法：node --env-file=.env.local scripts/add-factory-design.mjs <本機圖片路徑> [顯示名稱]\n' +
+      '或：  node --env-file=.env.local scripts/add-factory-design.mjs --text "顯示文字"'
+  );
   process.exit(1);
 }
 
@@ -28,6 +35,20 @@ const BUCKET = 'factory-designs';
 const CONTENT_TYPES = { '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.png': 'image/png', '.webp': 'image/webp' };
 
 async function main() {
+  if (first === '--text') {
+    const text = second;
+    if (!text) {
+      console.error('用法：node --env-file=.env.local scripts/add-factory-design.mjs --text "顯示文字"');
+      process.exit(1);
+    }
+    const { error: insertErr } = await supabase.from('factory_designs').insert({ storage_path: null, name: text });
+    if (insertErr) throw insertErr;
+    console.log(`已新增文字佔位設計圖：${text}`);
+    return;
+  }
+
+  const filePath = first;
+  const displayName = second;
   const ext = extname(filePath).toLowerCase() || '.jpg';
   const contentType = CONTENT_TYPES[ext] || 'image/jpeg';
   const fileBuffer = readFileSync(filePath);

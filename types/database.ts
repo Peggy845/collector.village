@@ -134,7 +134,7 @@ export interface GameCurrencyLedgerEntry {
 
 export interface FactoryDesign {
   id: number;
-  storage_path: string;
+  storage_path: string | null;
   name: string | null;
   is_active: boolean;
   created_at: string;

@@ -3,8 +3,8 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { findFormatByKey } from '@/lib/factory/catalog';
-import { getFactoryDesignUrl } from '@/lib/supabase/factory';
 import type { FactoryDesign, FactoryInventoryItem } from '@/types/database';
+import DesignThumb from './DesignThumb';
 
 export default function Warehouse({
   inventory,
@@ -56,10 +56,8 @@ export default function Warehouse({
                 className="flex items-center gap-3 rounded border border-neutral-200 px-4 py-3"
               >
                 {design && (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img
-                    src={getFactoryDesignUrl(design.storage_path)}
-                    alt={design.name ?? '設計圖'}
+                  <DesignThumb
+                    design={design}
                     className="h-12 w-12 shrink-0 rounded border border-neutral-200 object-cover"
                   />
                 )}

@@ -3,9 +3,9 @@
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import type { FactoryMachine } from '@/lib/factory/catalog';
-import { getFactoryDesignUrl } from '@/lib/supabase/factory';
 import type { FactoryDesign, FactoryProductionBatch } from '@/types/database';
 import Countdown from './Countdown';
+import DesignThumb from './DesignThumb';
 
 export default function MachineCard({
   machine,
@@ -132,11 +132,9 @@ export default function MachineCard({
 
           <div className="grid grid-cols-4 gap-2 sm:grid-cols-5">
             {designs.map((design) => (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img
+              <DesignThumb
                 key={design.id}
-                src={getFactoryDesignUrl(design.storage_path)}
-                alt={design.name ?? '設計圖'}
+                design={design}
                 onClick={() => setDesignId(design.id)}
                 className={`aspect-square w-full cursor-pointer rounded border object-cover ${
                   design.id === designId ? 'border-neutral-900 ring-2 ring-neutral-900' : 'border-neutral-200'

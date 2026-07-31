@@ -204,13 +204,17 @@ create table if not exists public.game_currency_ledger (
 
 -- factory_designs：v1 由 Peggy 自行到網路上尋找可商用/可修改授權的圖片，用 scripts/add-factory-design.mjs
 -- 上傳到 public bucket 並寫入這張表，玩家生產時只能從這裡面選圖，不開放玩家自己上傳（見已定案項目31第3點）。
+-- storage_path 允許為 null：正式圖庫還沒準備好之前，先用純文字（name）當佔位設計圖，
+-- 前端沒有圖片時改顯示文字色塊，讓工廠功能可以先跑起來，之後 Peggy 找到圖再補上 storage_path。
 create table if not exists public.factory_designs (
   id serial primary key,
-  storage_path text not null,                -- factory-designs bucket 內路徑
-  name text,                                  -- 顯示用名稱，方便 Peggy 自己管理，不對玩家顯示來源資訊
+  storage_path text,                         -- factory-designs bucket 內路徑，null 代表用純文字佔位
+  name text,                                  -- 顯示用名稱；storage_path 為 null 時直接顯示這個文字
   is_active boolean not null default true,    -- 之後發現授權問題可下架，不必真的刪除歷史生產紀錄引用的圖
   created_at timestamp default now()
 );
+
+alter table public.factory_designs alter column storage_path drop not null;
 
 -- factory_production_batches：一筆代表玩家在某台機器啟動的一次生產。quantity/material_cost 用「下單當下」
 -- 從 catalog 抓出來的數字存成快照，避免之後調整經濟數字時，回頭改到玩家已經在生產中的紀錄。
