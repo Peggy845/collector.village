@@ -396,7 +396,7 @@ collector-village/
 | `/browse` | 收藏庫瀏覽，含篩選面板（作品/系列/大小分類/賞別/角色）+ 分頁 |
 | `/products/[id]` | 商品詳情頁：標記已擁有/虛擬收藏/想要、編輯備註+入手日期、上傳照片（前端自動壓縮長邊至1600px再傳 Supabase Storage，上傳前需勾選「實體拍攝＋授權使用」確認框才能選檔，2026-07-30 新增）；商品若有公版代表照則顯示於頂部，沒有的話顯示「幫忙補一張照片」提交表單（2026-07-30 新增，見第30項） |
 | `/town` | 小鎮總覽（登入後首頁）：圖書館(=dashboard)、家(=browse/wishlist) 可進入，工廠/超市/市集/服飾店灰階佔位 |
-| `/dashboard` | 我的收藏紀錄：全站(開放集合,原始數字)/依系列(封閉集合,%)/依角色(開放集合,原始數字) 三層統計，實體與虛擬分開顯示 |
+| `/dashboard` | 我的收藏紀錄：全站(開放集合,原始數字)/依系列(封閉集合,%)/依角色(開放集合,原始數字) 三層統計，實體與虛擬分開顯示；依系列/依角色每一列可點擊展開，顯示實際貢獻該數字的商品清單並可點入商品詳情頁（2026-07-31 新增，見下方說明） |
 | `/wishlist` | 想要清單，重用 browse 的 ProductCard，篩選 `owned_status='wanted'` |
 | `/settings` | 暱稱、社群連結、改密碼、刪除帳號（需輸入確認字串，`/api/account/delete` 用 service role 清 Storage 照片後刪除 auth 使用者，DB 資料靠 FK cascade 自動清除） |
 | Header 導覽列 | 全站共用，依登入狀態顯示不同連結 |
@@ -408,6 +408,12 @@ collector-village/
 | `/albums/share/[token]` | 公開唯讀檢視，不需登入；只顯示商品名稱與使用者自己上傳的照片，不顯示備註/入手日期/擁有狀態；未公開或 token 不存在一律回 404，不透露私人收納冊存在 |
 
 驗證狀態：`npm run build`、`npx tsc --noEmit`、`npm run lint` 均通過；dev server 逐一路由 curl 測試無誤（受保護頁面未登入時正確 307 導向 `/login`）；`products.csv` 已實際匯入資料庫，`/browse` 顯示 400 件商品共 9 頁，`/products/1` 等詳情頁確認能正確顯示真實資料。**正式環境（Vercel）已於 2026-07-28 部署成功並用 curl+瀏覽器截圖驗證首頁/browse/商品詳情頁皆正常顯示真實資料。**收藏標記/備註/照片上傳/我的收藏統計/想要清單/個人設定/刪除帳號整條流程也已用真實測試帳號在正式環境操作過一遍，全部正常（刪除帳號會連 Storage 照片、`auth.users`、`user_collections` 一併清乾淨，已用腳本查證）。
+
+### 我的收藏紀錄：依系列/依角色展開明細（2026-07-31 新增）
+
+- **背景**：Peggy 回報「依角色」加總看起來比實際收藏件數多、且系列/角色列點下去沒反應，懷疑是 bug。查證後確認數字計算沒有錯——是同一件標了多位角色的商品（呼應第12項多角色商品規則），會同時計進每個角色各自的分子，加總本來就會超過實際件數；但「點擊沒反應」是真的，因為原本那兩排就只是純顯示用的 `<li>`，從未實作互動。
+- **新增**：新增 `components/dashboard/ExpandableProgressRow.tsx`（client component），讓「依系列」「依角色」每一列可點擊展開／收合，顯示實際貢獻該數字的商品名稱清單，並可點擊連到 `/products/[id]`；虛擬收藏的項目會標註「虛擬收藏」。純資訊呈現，不涉及排行榜/比較，不牴觸第12-1項反焦慮原則。
+- **已驗證**：`tsc --noEmit`／`lint`／`build` 皆通過；本機 dev server 用真實測試帳號登入操作，確認點擊「里維·阿卡曼」與對應系列列都能正確展開出同樣兩件商品，點商品名稱能正確導到商品詳情頁。
 
 ### CSV 匯入結果（2026-07-28）
 
@@ -433,7 +439,7 @@ collector-village/
   - `scripts/reject-photo-submission.mjs <submission_id>`：標記 rejected、刪除暫存檔案。
   - `scripts/set-official-photo.mjs <product_id> <本機圖片路徑>`：Peggy 自己上傳時直接跳過審核流程（見第30項：站長本人不需要審核自己）。
 - **公開顯示**：`/products/[id]` 頂部與 `/browse`／`/wishlist` 的 `ProductCard` 縮圖皆會顯示 `official_photo_path`（`lib/supabase/storage.ts` 的 `getOfficialProductPhotoUrl`，純字串組合公開網址，不需要簽名、不需要 Supabase client，Server/Client Component 皆可直接呼叫）。
-- **已驗證**：`tsc --noEmit`／`lint`／`build` 皆通過；本機 dev server 實際跑過完整流程並確認後清空測試資料——`set-official-photo.mjs` 上傳真實圖片後 `/products/[id]` 與 `/browse` 都正確顯示縮圖；模擬一筆待審提交後跑 `approve-photo-submission.mjs`，確認 `official_photo_path`／提交狀態／遊戲幣帳本／暫存檔案清除四項都正確；另模擬一筆跑 `reject-photo-submission.mjs`，確認狀態改為 rejected 且暫存檔案被刪除。**尚未 push 到正式站。**
+- **已驗證**：`tsc --noEmit`／`lint`／`build` 皆通過；本機 dev server 實際跑過完整流程並確認後清空測試資料——`set-official-photo.mjs` 上傳真實圖片後 `/products/[id]` 與 `/browse` 都正確顯示縮圖；模擬一筆待審提交後跑 `approve-photo-submission.mjs`，確認 `official_photo_path`／提交狀態／遊戲幣帳本／暫存檔案清除四項都正確；另模擬一筆跑 `reject-photo-submission.mjs`，確認狀態改為 rejected 且暫存檔案被刪除。**2026-07-31 確認：commit `e8fd5ff` 已 push 到 GitHub main 並成功部署到正式站（Vercel Production 顯示 Ready），用瀏覽器實際訪問 `/products/1` 確認補圖提交表單正常顯示。**
 
 ### 部署踩雷記錄（2026-07-28，供之後參考）
 
@@ -465,7 +471,7 @@ Vercel 專案 `qa-clinic-taiwan/collector-village` 是沿用舊靜態佔位頁�
 
 ### 已知缺口 / 下一步待辦（依優先順序）
 
-1. 修正 `products.csv` 中 2 筆錯位資料並重新匯入（非急迫，屬於資料完整性小尾巴，見上方「CSV 匯入結果」）。
+1. ~~修正 `products.csv` 中 2 筆錯位資料並重新匯入~~ **已於 2026-07-31 完成**：修正第41、66列的欄位錯位（manufacturer/official_price 補回 BANDAI/¥500、USJ/¥3200，release_date/tags/image_url/source_url 對應歸位）；查證資料庫發現這兩筆（product_code 40、65）其實已存在且資料正確（id 401、402），推測先前已用某種方式補上，此次修正 CSV 只是讓原始檔案跟資料庫內容一致，重跑 `npm run import:products` 確認全部 402 筆皆判定為既有資料，無需新增。
 2. 商品清單頁 pagination 目前每頁 48 筆，資料量變大後可視需要調整。
 3. 目前 `collector-village-git-main-qa-clinic-taiwan.vercel.app` 這個分支別名網址有 Vercel Deployment Protection（會導到 SSO 登入頁），主要正式網址 `collector-village-nine.vercel.app` 不受影響，如不需要可忽略。
 4. **圖片儲存規劃已定案（2026-07-30）**：大量商品圖片（光巨人可能上千張，之後還有其他IP）不進 git repo（避免 repo 體積暴增、撞 GitHub 檔案大小限制），沿用專案已在用的 Supabase Storage，不用另外接 Google 雲端硬碟。**等 Peggy 實際建立本機審核用資料夾、開始上傳圖片時**，記得把該資料夾加進 `.gitignore`；真正要在網站上顯示的圖片才上傳到 Supabase Storage，網站只存路徑/網址。
