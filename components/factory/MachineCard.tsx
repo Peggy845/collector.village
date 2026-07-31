@@ -2,19 +2,58 @@
 
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import type { FactoryMachine } from '@/lib/factory/catalog';
+import { MAX_QUEUE_PER_MACHINE, type FactoryMachine } from '@/lib/factory/catalog';
 import type { FactoryDesign, FactoryProductionBatch } from '@/types/database';
 import Countdown from './Countdown';
 import DesignThumb from './DesignThumb';
 
+function QueueSlot({
+  batch,
+  machine,
+  now,
+  onCollect,
+  loading,
+}: {
+  batch: FactoryProductionBatch;
+  machine: FactoryMachine;
+  now: number;
+  onCollect: (batchId: number) => void;
+  loading: boolean;
+}) {
+  const isReady = new Date(batch.ready_at).getTime() <= now;
+  const format = machine.formats.find((f) => f.key === batch.format_key);
+
+  return (
+    <div className="flex flex-col gap-2 rounded border border-neutral-200 bg-neutral-50 p-3 text-sm">
+      <p>
+        {format?.name} × {batch.quantity}
+      </p>
+      {isReady ? (
+        <button
+          type="button"
+          disabled={loading}
+          onClick={() => onCollect(batch.id)}
+          className="self-start rounded bg-neutral-900 px-4 py-2 text-sm text-white disabled:opacity-50"
+        >
+          {loading ? '收成中…' : '收成'}
+        </button>
+      ) : (
+        <p className="text-neutral-600">
+          <Countdown readyAt={batch.ready_at} />
+        </p>
+      )}
+    </div>
+  );
+}
+
 export default function MachineCard({
   machine,
   designs,
-  activeBatch,
+  batches,
 }: {
   machine: FactoryMachine;
   designs: FactoryDesign[];
-  activeBatch: FactoryProductionBatch | null;
+  batches: FactoryProductionBatch[];
 }) {
   const router = useRouter();
   const [formatKey, setFormatKey] = useState(machine.formats[0].key);
@@ -24,7 +63,7 @@ export default function MachineCard({
   const [now, setNow] = useState(() => Date.now());
 
   const selectedFormat = machine.formats.find((f) => f.key === formatKey)!;
-  const isReady = activeBatch ? new Date(activeBatch.ready_at).getTime() <= now : false;
+  const queueFull = batches.length >= MAX_QUEUE_PER_MACHINE;
 
   useEffect(() => {
     const interval = setInterval(() => setNow(Date.now()), 1000);
@@ -45,24 +84,24 @@ export default function MachineCard({
         body: JSON.stringify({ machineKey: machine.key, formatKey, designId }),
       });
       const body = await res.json();
-      if (!res.ok) throw new Error(body.error ?? '開始生產失敗');
+      if (!res.ok) throw new Error(body.error ?? '排入生產失敗');
+      setDesignId(null);
       router.refresh();
     } catch (err) {
-      setError(err instanceof Error ? err.message : '開始生產失敗');
+      setError(err instanceof Error ? err.message : '排入生產失敗');
     } finally {
       setLoading(false);
     }
   }
 
-  async function handleCollect() {
-    if (!activeBatch) return;
+  async function handleCollect(batchId: number) {
     setError(null);
     setLoading(true);
     try {
       const res = await fetch('/api/factory/collect', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ batchId: activeBatch.id }),
+        body: JSON.stringify({ batchId }),
       });
       const body = await res.json();
       if (!res.ok) throw new Error(body.error ?? '收成失敗');
@@ -79,33 +118,31 @@ export default function MachineCard({
       <div>
         <h3 className="text-base font-semibold">{machine.name}</h3>
         <p className="text-xs text-neutral-500">
-          原料：{machine.materialName}（{machine.materialCost} 幣／份）
+          原料：{machine.materialName}（{machine.materialCost} 幣／份）・排隊 {batches.length}/{MAX_QUEUE_PER_MACHINE}
         </p>
       </div>
 
       {error && <p className="text-xs text-red-600">{error}</p>}
 
-      {activeBatch ? (
-        <div className="flex flex-col gap-2 rounded border border-neutral-200 bg-neutral-50 p-3 text-sm">
-          <p>
-            生產中：{machine.formats.find((f) => f.key === activeBatch.format_key)?.name} ×{' '}
-            {activeBatch.quantity}
-          </p>
-          {isReady ? (
-            <button
-              type="button"
-              disabled={loading}
-              onClick={handleCollect}
-              className="self-start rounded bg-neutral-900 px-4 py-2 text-sm text-white disabled:opacity-50"
-            >
-              {loading ? '收成中…' : '收成'}
-            </button>
-          ) : (
-            <p className="text-neutral-600">
-              <Countdown readyAt={activeBatch.ready_at} onComplete={() => router.refresh()} />
-            </p>
-          )}
+      {batches.length > 0 && (
+        <div className="flex flex-col gap-2">
+          {batches.map((batch) => (
+            <QueueSlot
+              key={batch.id}
+              batch={batch}
+              machine={machine}
+              now={now}
+              onCollect={handleCollect}
+              loading={loading}
+            />
+          ))}
         </div>
+      )}
+
+      {queueFull ? (
+        <p className="text-xs text-neutral-500">
+          排隊已滿（最多同時排 {MAX_QUEUE_PER_MACHINE} 批），等前面收成後才能再排新的一批。
+        </p>
       ) : (
         <div className="flex flex-col gap-3">
           <div className="flex flex-wrap gap-2">
@@ -120,15 +157,10 @@ export default function MachineCard({
                     : 'border-neutral-300 text-neutral-700 hover:border-neutral-500'
                 }`}
               >
-                {format.name}
+                {format.name} {format.outputQuantity}件
               </button>
             ))}
           </div>
-
-          <p className="text-xs text-neutral-500">
-            預期產出 {selectedFormat.outputQuantity} 件，全賣掉約 {selectedFormat.outputQuantity * selectedFormat.sellPricePerUnit}{' '}
-            幣，生產約需 {selectedFormat.productionMinutes} 分鐘
-          </p>
 
           <div className="grid grid-cols-4 gap-2 sm:grid-cols-5">
             {designs.map((design) => (
@@ -143,13 +175,18 @@ export default function MachineCard({
             ))}
           </div>
 
+          <p className="text-xs text-neutral-500">
+            製作「{selectedFormat.name} × {selectedFormat.outputQuantity}」，花費 {machine.materialCost} 幣，共{' '}
+            {selectedFormat.productionMinutes} 分鐘
+          </p>
+
           <button
             type="button"
             disabled={loading}
             onClick={handleStart}
             className="self-start rounded bg-neutral-900 px-4 py-2 text-sm text-white disabled:opacity-50"
           >
-            {loading ? '處理中…' : `開始生產（花費 ${machine.materialCost} 幣）`}
+            {loading ? '處理中…' : '製作'}
           </button>
         </div>
       )}

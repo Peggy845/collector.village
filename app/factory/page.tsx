@@ -23,7 +23,15 @@ export default async function FactoryPage() {
     fetchInventory(supabase, user.id),
   ]);
 
-  const batchByMachine = new Map(batches.map((b) => [b.machine_key, b]));
+  const batchesByMachine = new Map<string, typeof batches>();
+  for (const batch of batches) {
+    const list = batchesByMachine.get(batch.machine_key) ?? [];
+    list.push(batch);
+    batchesByMachine.set(batch.machine_key, list);
+  }
+  for (const list of batchesByMachine.values()) {
+    list.sort((a, b) => new Date(a.ready_at).getTime() - new Date(b.ready_at).getTime());
+  }
 
   return (
     <main className="mx-auto flex w-full max-w-4xl flex-1 flex-col gap-8 px-4 py-10">
@@ -50,7 +58,7 @@ export default async function FactoryPage() {
                 key={machine.key}
                 machine={machine}
                 designs={designs}
-                activeBatch={batchByMachine.get(machine.key) ?? null}
+                batches={batchesByMachine.get(machine.key) ?? []}
               />
             ))}
           </div>

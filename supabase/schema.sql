@@ -243,13 +243,14 @@ alter table public.factory_production_batches alter column started_at type times
 alter table public.factory_production_batches alter column ready_at type timestamptz using ready_at::timestamptz;
 alter table public.factory_production_batches alter column collected_at type timestamptz using collected_at::timestamptz;
 
--- 同一台機器同一時間只能有一批生產中（見已定案項目31：四台不同機器可以同時生產，但同一台不行）。
--- 用資料庫層的 partial unique index 而不是應用層先查再寫，是因為「先查有沒有生產中→沒有就寫入」
--- 這兩步中間有空隙，兩個幾乎同時送出的請求都可能查到「沒有」而各自寫入一筆，造成同一台機器
--- 有兩批生產中；partial unique index 由資料庫保證原子性，不會有這個問題。
-create unique index if not exists factory_production_batches_one_active_per_machine
-  on public.factory_production_batches (user_id, machine_key)
-  where status = 'in_progress';
+-- 排隊生產（2026-07-31 補充定案，見 PROJECT_PROGRESS.md 已定案項目31補充）：同一台機器同時只會有
+-- 一批「正在跑」，但允許同時排最多 MAX_QUEUE_PER_MACHINE（見 lib/factory/catalog.ts）批在佇列裡，
+-- 讓玩家不用每 10~30 分鐘就開一次遊戲。佇列順序直接用 ready_at 排序即可（新排的批次 ready_at
+-- 一定接在佇列最後一批之後，見 app/api/factory/start/route.ts），不需要額外的排序欄位。
+-- 這裡不像先前「同一時間只能一批」那樣用 partial unique index 擋重複，因為現在同一台機器本來就允許
+-- 多筆 in_progress，最多 4 筆的上限只在應用層檢查（多排到 5、6 筆頂多是佇列看起來比預期多一點，
+-- 不是資料損毀或能白拿獎勵的問題，跟先前「兩批同時搶當唯一一批」的嚴重度不同，不特地做成資料庫約束）。
+drop index if exists factory_production_batches_one_active_per_machine;
 
 -- factory_inventory_items：收成後的成品堆疊在這裡，依「格式+設計圖」歸類，賣出時扣減數量，
 -- 數量歸零直接留著（quantity=0）或刪除都可以，應用層一律用 upsert 處理，不特別清理。

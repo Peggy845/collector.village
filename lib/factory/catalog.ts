@@ -21,6 +21,10 @@ export interface FactoryMachine {
   formats: FactoryFormat[];
 }
 
+// 排隊上限：同一台機器最多同時排 4 批，依序生產，玩家不用每 10~30 分鐘就開一次遊戲
+// （見 PROJECT_PROGRESS.md 已定案項目31補充：真正玩家可能上班中，沒辦法那麼頻繁盯著手機）。
+export const MAX_QUEUE_PER_MACHINE = 4;
+
 export const FACTORY_MACHINES: FactoryMachine[] = [
   {
     key: 'printer',
