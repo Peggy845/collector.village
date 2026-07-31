@@ -9,3 +9,6 @@ build/
 next-env.d.ts
 .vercel
 npm-debug.log*
+
+# 本機審核用資料夾，正式素材審核通過後用腳本上傳到 Supabase Storage，不進 git（見 PROJECT_PROGRESS.md 已知缺口第4項的既有慣例）
+local-assets/

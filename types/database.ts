@@ -1,6 +1,19 @@
 export type OwnedStatus = 'owned_real' | 'owned_virtual' | 'wanted';
 export type SubmissionStatus = 'pending' | 'approved' | 'rejected';
 export type LayoutType = '1' | '2h' | '2v' | '3h' | '3v' | '4' | '6' | '8' | '9';
+export type MachineKey = 'printer' | 'sewing' | 'press' | 'laser';
+export type FormatKey =
+  | 'poster'
+  | 'postcard'
+  | 'card'
+  | 'sticker'
+  | 'plush'
+  | 'plush_outfit'
+  | 'badge'
+  | 'keychain'
+  | 'acrylic_stand'
+  | 'acrylic_charm';
+export type ProductionBatchStatus = 'in_progress' | 'collected';
 
 export interface Ip {
   id: number;
@@ -117,4 +130,35 @@ export interface GameCurrencyLedgerEntry {
   amount: number;
   reason: string | null;
   created_at: string;
+}
+
+export interface FactoryDesign {
+  id: number;
+  storage_path: string;
+  name: string | null;
+  is_active: boolean;
+  created_at: string;
+}
+
+export interface FactoryProductionBatch {
+  id: number;
+  user_id: string;
+  machine_key: MachineKey;
+  format_key: FormatKey;
+  design_id: number;
+  quantity: number;
+  material_cost: number;
+  status: ProductionBatchStatus;
+  started_at: string;
+  ready_at: string;
+  collected_at: string | null;
+}
+
+export interface FactoryInventoryItem {
+  id: number;
+  user_id: string;
+  format_key: FormatKey;
+  design_id: number;
+  quantity: number;
+  updated_at: string;
 }

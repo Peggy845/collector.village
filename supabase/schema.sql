@@ -190,9 +190,73 @@ create table if not exists public.product_photo_submissions (
 create table if not exists public.game_currency_ledger (
   id serial primary key,
   user_id uuid references public.users(id) on delete cascade not null,
-  amount int not null,                       -- 正數為獲得，負數為花費（花費機制尚未設計，目前只會有正數）
-  reason text,                               -- 例如 'photo_submission_approved:product_id=123'
+  amount int not null,                       -- 正數為獲得，負數為花費，見「已定案項目 31」工廠系統開始使用花費
+  reason text,                               -- 例如 'photo_submission_approved:product_id=123'、'factory_production:batch_id=45'
   created_at timestamp default now()
+);
+
+-- =========================================
+-- 10. 工廠系統 v1（見「已定案項目 31」）
+-- =========================================
+-- 機器/原料/格式的完整換算表（成本、產出數量、售價）刻意不建表，寫死在
+-- lib/factory/catalog.ts 常數裡即可——這是固定的遊戲規則資料，不需要玩家或管理者透過網頁調整，
+-- 建表反而要多一層「怎麼管理這張表的內容」的問題，不符合v1求簡單的原則。
+
+-- factory_designs：v1 由 Peggy 自行到網路上尋找可商用/可修改授權的圖片，用 scripts/add-factory-design.mjs
+-- 上傳到 public bucket 並寫入這張表，玩家生產時只能從這裡面選圖，不開放玩家自己上傳（見已定案項目31第3點）。
+create table if not exists public.factory_designs (
+  id serial primary key,
+  storage_path text not null,                -- factory-designs bucket 內路徑
+  name text,                                  -- 顯示用名稱，方便 Peggy 自己管理，不對玩家顯示來源資訊
+  is_active boolean not null default true,    -- 之後發現授權問題可下架，不必真的刪除歷史生產紀錄引用的圖
+  created_at timestamp default now()
+);
+
+-- factory_production_batches：一筆代表玩家在某台機器啟動的一次生產。quantity/material_cost 用「下單當下」
+-- 從 catalog 抓出來的數字存成快照，避免之後調整經濟數字時，回頭改到玩家已經在生產中的紀錄。
+-- 只有兩種狀態：in_progress／collected，「是否已經可以收成」由應用層比較 ready_at 與現在時間判斷，
+-- 不需要額外的第三種狀態。
+create table if not exists public.factory_production_batches (
+  id serial primary key,
+  user_id uuid references public.users(id) on delete cascade not null,
+  machine_key text not null,                 -- printer / sewing / press / laser
+  format_key text not null,                  -- poster / postcard / card / sticker / plush / plush_outfit / badge / keychain / acrylic_stand / acrylic_charm
+  design_id int references public.factory_designs(id) not null,
+  quantity int not null,
+  material_cost int not null,
+  status text not null default 'in_progress', -- 'in_progress' / 'collected'
+  -- 這三欄用 timestamptz（不是專案裡其他表常用的 timestamp）：ready_at 需要拿來跟應用層算出來的
+  -- 絕對時間（Date.now() + 生產分鐘數）比較是否可以收成，若用不含時區的 timestamp，
+  -- 資料庫連線階段的時區設定會讓存進去的值悄悄位移，導致「還沒到時間就顯示可以收成」。
+  started_at timestamptz default now(),
+  ready_at timestamptz not null,
+  collected_at timestamptz
+);
+
+-- factory_production_batches 若在此修正之前就已建立過（欄位當時是 timestamp 不含時區），
+-- 這裡補一次型別修正，重複執行安全（欄位已經是 timestamptz 時這幾行是無害的 no-op）。
+alter table public.factory_production_batches alter column started_at type timestamptz using started_at::timestamptz;
+alter table public.factory_production_batches alter column ready_at type timestamptz using ready_at::timestamptz;
+alter table public.factory_production_batches alter column collected_at type timestamptz using collected_at::timestamptz;
+
+-- 同一台機器同一時間只能有一批生產中（見已定案項目31：四台不同機器可以同時生產，但同一台不行）。
+-- 用資料庫層的 partial unique index 而不是應用層先查再寫，是因為「先查有沒有生產中→沒有就寫入」
+-- 這兩步中間有空隙，兩個幾乎同時送出的請求都可能查到「沒有」而各自寫入一筆，造成同一台機器
+-- 有兩批生產中；partial unique index 由資料庫保證原子性，不會有這個問題。
+create unique index if not exists factory_production_batches_one_active_per_machine
+  on public.factory_production_batches (user_id, machine_key)
+  where status = 'in_progress';
+
+-- factory_inventory_items：收成後的成品堆疊在這裡，依「格式+設計圖」歸類，賣出時扣減數量，
+-- 數量歸零直接留著（quantity=0）或刪除都可以，應用層一律用 upsert 處理，不特別清理。
+create table if not exists public.factory_inventory_items (
+  id serial primary key,
+  user_id uuid references public.users(id) on delete cascade not null,
+  format_key text not null,
+  design_id int references public.factory_designs(id) not null,
+  quantity int not null default 0,
+  updated_at timestamp default now(),
+  unique (user_id, format_key, design_id)
 );
 
 -- =========================================
@@ -357,9 +421,27 @@ drop policy if exists "own photo submissions delete pending" on public.product_p
 create policy "own photo submissions delete pending" on public.product_photo_submissions
   for delete using (auth.uid() = submitted_by and status = 'pending');
 
--- game_currency_ledger：使用者只能查看自己的帳本紀錄，寫入僅限 service role（審核腳本發放獎勵）
+-- game_currency_ledger：使用者只能查看自己的帳本紀錄，寫入僅限 service role（審核腳本發放獎勵／工廠API扣款加款）
 drop policy if exists "own ledger select" on public.game_currency_ledger;
 create policy "own ledger select" on public.game_currency_ledger for select using (auth.uid() = user_id);
+
+-- factory_designs：全站玩家皆可讀（挑圖用），寫入僅限 service role（add-factory-design.mjs 腳本）
+alter table public.factory_designs enable row level security;
+drop policy if exists "factory designs readable by everyone" on public.factory_designs;
+create policy "factory designs readable by everyone" on public.factory_designs for select using (is_active);
+
+-- factory_production_batches / factory_inventory_items：使用者只能查看自己的紀錄，
+-- 寫入（開始生產／收成／賣出）一律透過 app/api/factory/* 路由用 service role 執行，
+-- 不開放一般角色直接 insert/update，避免玩家繞過 API 直接竄改遊戲幣或生產數量。
+alter table public.factory_production_batches enable row level security;
+drop policy if exists "own production batches select" on public.factory_production_batches;
+create policy "own production batches select" on public.factory_production_batches
+  for select using (auth.uid() = user_id);
+
+alter table public.factory_inventory_items enable row level security;
+drop policy if exists "own inventory select" on public.factory_inventory_items;
+create policy "own inventory select" on public.factory_inventory_items
+  for select using (auth.uid() = user_id);
 
 -- =========================================
 -- Storage：collection-photos bucket
@@ -418,3 +500,13 @@ create policy "own pending photo submissions delete" on storage.objects for dele
 
 -- product-photos 是 public bucket，讀取不需要政策（Supabase 對 public bucket 預設開放 select）；
 -- 寫入只由 service role 執行的審核腳本進行，一般角色不需要、也沒有 insert/update policy
+
+-- =========================================
+-- Storage：factory-designs bucket（工廠系統 v1，見「已定案項目 31」）
+-- =========================================
+-- public bucket，玩家生產時選圖需要能直接讀取縮圖；寫入只由 scripts/add-factory-design.mjs
+-- （service role）執行，一般角色不需要、也沒有 insert/update policy，比照 product-photos 的做法。
+
+insert into storage.buckets (id, name, public)
+values ('factory-designs', 'factory-designs', true)
+on conflict (id) do nothing;
