@@ -11,16 +11,18 @@ function QueueSlot({
   batch,
   machine,
   now,
+  isActive,
   onCollect,
   loading,
 }: {
   batch: FactoryProductionBatch;
   machine: FactoryMachine;
   now: number;
+  isActive: boolean;
   onCollect: (batchId: number) => void;
   loading: boolean;
 }) {
-  const isReady = new Date(batch.ready_at).getTime() <= now;
+  const isReady = isActive && new Date(batch.ready_at).getTime() <= now;
   const format = machine.formats.find((f) => f.key === batch.format_key);
 
   return (
@@ -37,10 +39,12 @@ function QueueSlot({
         >
           {loading ? '收成中…' : '收成'}
         </button>
-      ) : (
+      ) : isActive ? (
         <p className="text-neutral-600">
           <Countdown readyAt={batch.ready_at} />
         </p>
+      ) : (
+        <p className="text-neutral-400">排隊中・輪到它開始生產後約需 {format?.productionMinutes} 分鐘</p>
       )}
     </div>
   );
@@ -126,16 +130,24 @@ export default function MachineCard({
 
       {batches.length > 0 && (
         <div className="flex flex-col gap-2">
-          {batches.map((batch) => (
-            <QueueSlot
-              key={batch.id}
-              batch={batch}
-              machine={machine}
-              now={now}
-              onCollect={handleCollect}
-              loading={loading}
-            />
-          ))}
+          {batches.map((batch, index) => {
+            // 佇列裡排在後面的批次，要等前一批的 ready_at 到了才算真的開始生產（見已定案項目31補充：
+            // 排隊生產）。batches 依 ready_at 由小到大排序，且 ready_at 是累加算出來的，所以只要看
+            // 前一項的 ready_at 有沒有到，就能判斷這一項是不是已經輪到它。
+            const previous = batches[index - 1];
+            const isActive = !previous || new Date(previous.ready_at).getTime() <= now;
+            return (
+              <QueueSlot
+                key={batch.id}
+                batch={batch}
+                machine={machine}
+                now={now}
+                isActive={isActive}
+                onCollect={handleCollect}
+                loading={loading}
+              />
+            );
+          })}
         </div>
       )}
 
