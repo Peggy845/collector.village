@@ -56,6 +56,7 @@ export interface UserProfile {
   warehouse_capacity: number;
   market_open: boolean;
   market_closed_at: string | null;
+  market_auto_restock: boolean;
   created_at: string;
 }
 

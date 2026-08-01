@@ -3,31 +3,24 @@
 import { useEffect, useState } from 'react';
 import type { MachineKey } from '@/types/database';
 
-// 工廠美化動畫的「骨架」元件（2026-08-01，見 idea/開發日誌.md 同日條目）。
-// 目的：先用純色塊/emoji 佔位把「待機→運作中→output→打包→運送」五段敘事的狀態切換邏輯搭好，
-// Peggy 之後用 Gemini 生成美術素材（參考 idea/印表機1~5.png）後，只需要把下面 STAGE_ICON
-// 換成 <img src="真的圖檔">，呼叫端（MachineCard）完全不用改，因為狀態判斷邏輯不在這個檔案裡。
-export type MachineStage = 'idle' | 'processing' | 'ready' | 'collecting' | 'shipped';
-
-const STAGE_LABEL: Record<MachineStage, string> = {
-  idle: '待機中',
-  processing: '運作中',
-  ready: '已完成，等待收成',
-  collecting: '打包中…',
-  shipped: '已送往工廠倉庫',
+// 工廠美化動畫（2026-08-02 依 idea/印表機簡單版.png 改版，取代原本的五段式敘事骨架）。
+// Peggy 確認參考影片等級的3D建築動畫太細，改用更簡單的模型：
+//   - 建築本體是 Gemini 生成的靜態小鎮風格插畫，永遠不變（不做多階段圖）。
+//   - 疊加兩個小圖示，只有這兩個會變化：
+//     A（煙囪位置，右上角）：有批次正在倒數生產中＝冒煙，沒有（含排隊中/已完成待收成）＝Zzz睡覺符號。
+//     B（出貨口位置，右下角）：佇列裡有沒有「已完成、還沒按收成」的批次＝一堆貨，沒有＝空白
+//       （2026-08-02 改成看佇列而非工廠倉庫庫存，見 idea/圖示不對.png：原本看倉庫庫存時，
+//       玩家會看到序列明明是空的卻出現貨堆，因為倉庫裡還留著很久以前收成、還沒拿去超市上架的舊庫存）。
+// 建築本體目前用 emoji 佔位（BUILDING_EMOJI），之後 Peggy 從 Gemini 拿到真的圖，
+// 只需要把它換成 <img src="真的圖檔">，呼叫端（MachineCard）完全不用改，因為狀態判斷邏輯不在這個檔案裡。
+const BUILDING_EMOJI: Record<MachineKey, string> = {
+  printer: '🖨️',
+  sewing: '🧵',
+  press: '⚙️',
+  laser: '💠',
 };
 
-// 每台機器在「待機／運作中／完成」三個階段各自的佔位圖示，呼應 idea/印表機1~5.png 的敘事
-// （待機＝原料還沒動、運作中＝正在加工、完成＝成品長出來了）。打包／運送兩階段是四台機器共用的
-// 通用動作，不需要每台機器分別設計。
-const STAGE_ICON: Record<MachineKey, Record<'idle' | 'processing' | 'ready', string>> = {
-  printer: { idle: '🧻', processing: '🖨️', ready: '📄' },
-  sewing: { idle: '🧵', processing: '🪡', ready: '🧸' },
-  press: { idle: '⚙️', processing: '🔨', ready: '🎖️' },
-  laser: { idle: '💠', processing: '✨', ready: '🔷' },
-};
-
-const MACHINE_ACCENT: Record<MachineKey, string> = {
+const BUILDING_ACCENT: Record<MachineKey, string> = {
   printer: 'border-sky-200 bg-sky-50',
   sewing: 'border-rose-200 bg-rose-50',
   press: 'border-amber-200 bg-amber-50',
@@ -36,58 +29,49 @@ const MACHINE_ACCENT: Record<MachineKey, string> = {
 
 export default function MachineScene({
   machineKey,
-  stage,
-  progress = 0,
-  designName,
-  formatName,
-  quantity,
+  producing,
+  hasReadyBatch,
+  justCollected,
 }: {
   machineKey: MachineKey;
-  stage: MachineStage;
-  /** 0~1，只在 processing 階段用來畫進度條，其餘階段忽略 */
-  progress?: number;
-  designName?: string;
-  formatName?: string;
-  quantity?: number;
+  /** 有批次正在倒數生產中（決定煙囪冒煙還是Zzz） */
+  producing: boolean;
+  /** 佇列裡有沒有已完成、還沒按收成的批次（決定出貨口那格有沒有貨） */
+  hasReadyBatch: boolean;
+  /** 剛按下收成的短暫提示，跟 hasReadyBatch 無關，純粹給玩家一個「有收到」的反饋 */
+  justCollected?: boolean;
 }) {
-  const icon =
-    stage === 'idle' || stage === 'processing' || stage === 'ready'
-      ? STAGE_ICON[machineKey][stage]
-      : stage === 'collecting'
-        ? '📦'
-        : '🚚';
-
   return (
-    <div className={`flex items-center gap-3 rounded-lg border p-3 transition-colors ${MACHINE_ACCENT[machineKey]}`}>
+    <div
+      className={`relative flex h-28 items-center justify-center overflow-visible rounded-lg border ${BUILDING_ACCENT[machineKey]}`}
+    >
+      {/* 建築本體佔位，之後直接換成 <img src="Gemini生成的建築圖" /> */}
+      <span className="text-5xl opacity-70">{BUILDING_EMOJI[machineKey]}</span>
+
+      {/* A：煙囪位置 */}
       <span
-        className={`text-3xl leading-none ${stage === 'idle' ? 'opacity-50 grayscale' : ''} ${
-          stage === 'processing' ? 'animate-pulse' : ''
-        } ${stage === 'ready' ? 'animate-bounce' : ''} ${stage === 'collecting' ? 'animate-spin' : ''}`}
+        className="absolute right-3 top-1 text-xl"
+        aria-label={producing ? '生產中' : '待機中'}
+        title={producing ? '生產中' : '待機中'}
       >
-        {icon}
+        {producing ? <span className="animate-pulse">💨</span> : <span className="opacity-50">💤</span>}
       </span>
-      <div className="min-w-0 flex-1">
-        <p className={`text-xs ${stage === 'ready' ? 'font-medium text-neutral-800' : 'text-neutral-600'}`}>
-          {STAGE_LABEL[stage]}
-          {formatName && quantity ? `・${designName ? `${designName}・` : ''}${formatName} × ${quantity}` : ''}
-        </p>
-        {stage === 'processing' && (
-          <div className="mt-1.5 h-1.5 w-full overflow-hidden rounded-full bg-white/70">
-            <div
-              className="h-full rounded-full bg-neutral-900 transition-[width] duration-1000 ease-linear"
-              style={{ width: `${Math.min(100, Math.max(0, progress * 100))}%` }}
-            />
-          </div>
-        )}
-      </div>
-      {stage === 'shipped' && <ShippedFadeOut />}
+
+      {/* B：出貨口位置，有已完成待收成的批次才顯示 */}
+      {hasReadyBatch && (
+        <span className="absolute bottom-1 right-3 text-xl" aria-label="有完成的批次等待收成" title="有完成的批次等待收成">
+          📦
+        </span>
+      )}
+
+      {justCollected && <CollectedFlourish />}
     </div>
   );
 }
 
 // 收成成功的瞬間短暫顯示，之後自己淡出——用 key 讓每次收成都重新掛載，
 // 才能每次都從「不透明」重新開始淡出，不會因為前一次已經淡完而卡住。
-function ShippedFadeOut() {
+function CollectedFlourish() {
   const [faded, setFaded] = useState(false);
   useEffect(() => {
     const timer = setTimeout(() => setFaded(true), 50);
@@ -95,7 +79,9 @@ function ShippedFadeOut() {
   }, []);
   return (
     <span
-      className={`text-lg transition-opacity duration-[1200ms] ${faded ? 'opacity-0' : 'opacity-100'}`}
+      className={`absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 text-2xl transition-opacity duration-[1200ms] ${
+        faded ? 'opacity-0' : 'opacity-100'
+      }`}
       aria-hidden
     >
       ✅

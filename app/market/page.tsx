@@ -1,14 +1,23 @@
 import type { Metadata } from 'next';
 import Link from 'next/link';
 import { createClient } from '@/lib/supabase/server';
+import { createAdminClient } from '@/lib/supabase/admin';
 import { requireUser } from '@/lib/supabase/auth';
 import { fetchCurrencyBalance } from '@/lib/supabase/currency';
 import { fetchFactoryDesigns, fetchInventory } from '@/lib/supabase/factory';
-import { fetchMarketOpenState, fetchShelves, fetchShelfSlots } from '@/lib/supabase/market';
+import {
+  fetchMarketAutoRestockState,
+  fetchMarketOpenState,
+  fetchShelves,
+  fetchShelfSlots,
+} from '@/lib/supabase/market';
+import { autoRestockUser } from '@/lib/market/restock';
 import BuyShelfButton from '@/components/market/BuyShelfButton';
 import ShelfCard from '@/components/market/ShelfCard';
 import RevenuePanel from '@/components/market/RevenuePanel';
 import MarketOpenToggle from '@/components/market/MarketOpenToggle';
+import MarketAutoRestockToggle from '@/components/market/MarketAutoRestockToggle';
+import MarketAutoRefresh from '@/components/market/MarketAutoRefresh';
 
 export const metadata: Metadata = {
   title: '超市 | Collector.Village',
@@ -19,13 +28,18 @@ export default async function MarketPage() {
   const supabase = await createClient();
   const user = await requireUser(supabase, '/market');
 
-  const [balance, designs, inventory, shelves, slots, marketState] = await Promise.all([
+  // 自動上架模式開啟時，每次進來這個頁面都先幫忙補一次貨（見 lib/market/restock.ts），
+  // 這樣玩家一進頁面看到的就是補完的狀態，不用等下一次導覽列輪詢（每45秒）才補上。
+  await autoRestockUser(createAdminClient(), user.id);
+
+  const [balance, designs, inventory, shelves, slots, marketState, autoRestock] = await Promise.all([
     fetchCurrencyBalance(supabase, user.id),
     fetchFactoryDesigns(supabase),
     fetchInventory(supabase, user.id),
     fetchShelves(supabase, user.id),
     fetchShelfSlots(supabase, user.id),
     fetchMarketOpenState(supabase, user.id),
+    fetchMarketAutoRestockState(supabase, user.id),
   ]);
 
   const slotsByShelf = new Map<number, typeof slots>();
@@ -37,6 +51,7 @@ export default async function MarketPage() {
 
   return (
     <main className="mx-auto flex w-full max-w-4xl flex-1 flex-col gap-8 px-4 py-10">
+      <MarketAutoRefresh enabled={autoRestock} slots={slots} marketOpen={marketState.open} />
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <h1 className="text-2xl font-semibold">超市</h1>
@@ -47,7 +62,10 @@ export default async function MarketPage() {
             去工廠繼續生產 →
           </Link>
         </div>
-        <MarketOpenToggle open={marketState.open} />
+        <div className="flex flex-col items-end gap-2">
+          <MarketOpenToggle open={marketState.open} />
+          <MarketAutoRestockToggle autoRestock={autoRestock} />
+        </div>
       </div>
 
       <section className="flex items-center justify-between rounded-lg border border-neutral-200 p-6">

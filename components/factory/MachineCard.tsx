@@ -6,7 +6,7 @@ import { MAX_QUEUE_PER_MACHINE, type FactoryMachine } from '@/lib/factory/catalo
 import type { FactoryDesign, FactoryProductionBatch } from '@/types/database';
 import Countdown from './Countdown';
 import DesignThumb from './DesignThumb';
-import MachineScene, { type MachineStage } from './MachineScene';
+import MachineScene from './MachineScene';
 
 function QueueSlot({
   batch,
@@ -71,43 +71,29 @@ export default function MachineCard({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [now, setNow] = useState(() => Date.now());
-  // 收成流程的「打包中→已入庫」動畫覆蓋，跟被收成的那筆批次是否還存在於 batches 無關
-  // （router.refresh() 之後那筆批次就會從列表消失），所以不用 batchId 綁定，靠 timeout 自己收尾即可。
-  const [collectOverride, setCollectOverride] = useState<'collecting' | 'shipped' | null>(null);
-  const [collectFlourish, setCollectFlourish] = useState<{ name: string; designName: string; quantity: number } | null>(
-    null,
-  );
+  // 收成成功的短暫「✅」提示，跟 hasReadyBatch 是否為 true 無關，純粹是給玩家的即時反饋，
+  // 用 timeout 自己收尾，不用綁定被收成的那筆批次是否還存在於 batches。
+  const [justCollected, setJustCollected] = useState(false);
 
   const selectedFormat = machine.formats.find((f) => f.key === formatKey)!;
   const queueFull = batches.length >= MAX_QUEUE_PER_MACHINE;
-  const front = batches[0];
-  const frontFormat = front ? machine.formats.find((f) => f.key === front.format_key) : undefined;
-  const frontDesign = front ? designs.find((d) => d.id === front.design_id) : undefined;
 
-  let sceneStage: MachineStage = 'idle';
-  let sceneProgress = 0;
-  let sceneDesignName: string | undefined;
-  let sceneFormatName: string | undefined;
-  let sceneQuantity: number | undefined;
-
-  if (collectOverride) {
-    sceneStage = collectOverride;
-    sceneDesignName = collectFlourish?.designName;
-    sceneFormatName = collectFlourish?.name;
-    sceneQuantity = collectFlourish?.quantity;
-  } else if (front) {
-    const readyMs = new Date(front.ready_at).getTime();
-    const startedMs = new Date(front.started_at).getTime();
-    sceneDesignName = frontDesign?.name ?? undefined;
-    sceneFormatName = frontFormat?.name;
-    sceneQuantity = front.quantity;
-    if (readyMs <= now) {
-      sceneStage = 'ready';
-    } else {
-      sceneStage = 'processing';
-      sceneProgress = (now - startedMs) / Math.max(1, readyMs - startedMs);
-    }
-  }
+  // 見 idea/印表機簡單版.png 定案的簡化版工廠視覺：建築本體不變，只有「有沒有在冒煙」跟
+  // 「出貨口有沒有貨」兩個小圖示會變化，不做完整的五階段敘事動畫。
+  //
+  // 2026-08-02 修正：原本只看 batches[0]（佇列裡 ready_at 最早的那批）判斷有沒有在冒煙，
+  // 但 batches[0] 完成後（ready_at<=now）如果玩家還沒按收成，它會繼續留在佇列最前面，
+  // 這時候真正在跑的其實是「輪到它、但還沒到 ready_at」的那一批（見 idea/圖示不對.png：
+  // 壓模機第一批已完成待收成、第二批其實正在倒數0:34，卻顯示Zzz）。batches 依 ready_at
+  // 由小到大排序、且是接續排程（每批的開始時間＝前一批的 ready_at），所以「還沒到 ready_at
+  // 的那些批次」裡最早的一個，必然就是目前真正在跑的那一批——用 some() 判斷佇列裡有沒有
+  // 任何一批還沒到 ready_at 即可，不需要另外判斷是不是輪到它。
+  const producing = batches.some((b) => new Date(b.ready_at).getTime() > now);
+  // 出貨口圖示（2026-08-02 依 Peggy 回報改成看佇列，不看工廠倉庫庫存）：原本用「工廠倉庫裡這台
+  // 機器的成品庫存 > 0」判斷，但玩家看到的是「生產序列裡明明沒有東西」卻出現貨堆圖示，
+  // 因為倉庫庫存包含很久以前收成、還沒拿去超市上架的舊庫存，跟畫面上的生產序列脫鉤，容易誤會。
+  // 改成只看「佇列裡有沒有已完成、還沒按收成的批次」，跟畫面上會不會出現「收成」按鈕完全一致。
+  const hasReadyBatch = batches.some((b) => new Date(b.ready_at).getTime() <= now);
 
   useEffect(() => {
     const interval = setInterval(() => setNow(Date.now()), 1000);
@@ -141,11 +127,6 @@ export default function MachineCard({
   async function handleCollect(batchId: number) {
     setError(null);
     setLoading(true);
-    const target = batches.find((b) => b.id === batchId);
-    const format = target ? machine.formats.find((f) => f.key === target.format_key) : undefined;
-    const design = target ? designs.find((d) => d.id === target.design_id) : undefined;
-    setCollectFlourish({ name: format?.name ?? '', designName: design?.name ?? '', quantity: target?.quantity ?? 0 });
-    setCollectOverride('collecting');
     try {
       const res = await fetch('/api/factory/collect', {
         method: 'POST',
@@ -154,11 +135,10 @@ export default function MachineCard({
       });
       const body = await res.json();
       if (!res.ok) throw new Error(body.error ?? '收成失敗');
-      setCollectOverride('shipped');
+      setJustCollected(true);
       router.refresh();
-      setTimeout(() => setCollectOverride(null), 1500);
+      setTimeout(() => setJustCollected(false), 1500);
     } catch (err) {
-      setCollectOverride(null);
       setError(err instanceof Error ? err.message : '收成失敗');
     } finally {
       setLoading(false);
@@ -176,11 +156,9 @@ export default function MachineCard({
 
       <MachineScene
         machineKey={machine.key}
-        stage={sceneStage}
-        progress={sceneProgress}
-        designName={sceneDesignName}
-        formatName={sceneFormatName}
-        quantity={sceneQuantity}
+        producing={producing}
+        hasReadyBatch={hasReadyBatch}
+        justCollected={justCollected}
       />
 
       {error && <p className="text-xs text-red-600">{error}</p>}

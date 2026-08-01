@@ -302,6 +302,11 @@ alter table public.users add column if not exists warehouse_capacity int not nul
 alter table public.users add column if not exists market_open boolean not null default true;
 alter table public.users add column if not exists market_closed_at timestamptz;
 
+-- 手動上架／自動上架模式（見「已定案項目 32」補充、lib/market/restock.ts）：預設手動上架
+-- （維持原本行為，玩家自己上架、賣完就停在那裡）；開啟自動上架後，系統會在玩家造訪 /market
+-- 或導覽列輪詢通知摘要時，自動把貨架補滿，一路補到工廠倉庫庫存全部上架完為止。
+alter table public.users add column if not exists market_auto_restock boolean not null default false;
+
 create table if not exists public.market_shelves (
   id serial primary key,
   user_id uuid references public.users(id) on delete cascade not null,

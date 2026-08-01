@@ -3,6 +3,7 @@ import { createClient } from '@/lib/supabase/server';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { findFormatByKey } from '@/lib/factory/catalog';
 import { computeSlotRemaining } from '@/lib/market/catalog';
+import { upsertShelfSlot } from '@/lib/market/listing';
 import type { MarketShelfSlot } from '@/types/database';
 
 // 上架：把工廠倉庫裡的庫存移到指定貨架，取代原本工廠倉庫「全部賣掉」的即時收購
@@ -61,14 +62,6 @@ export async function POST(request: Request) {
     );
   }
 
-  // 新上架的商品接在同貨架「預計賣完最晚」的那個 slot 之後才開始算，貨架前面沒東西在賣就從現在開始
-  // （跟工廠佇列新批次接在最後一批之後的邏輯一致，見 app/api/factory/start/route.ts）。
-  const latestFinish = slots.reduce((max, s) => {
-    const finish = new Date(s.active_from).getTime() + s.quantity * 60 * 1000;
-    return Math.max(max, finish);
-  }, 0);
-  const activeFrom = new Date(Math.max(now, latestFinish)).toISOString();
-
   const { data: item } = await admin
     .from('factory_inventory_items')
     .select('id, quantity')
@@ -80,15 +73,11 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: '倉庫裡沒有這麼多件可以上架' }, { status: 400 });
   }
 
-  const { error: slotError } = await admin.from('market_shelf_slots').insert({
-    shelf_id: shelfId,
-    format_key: formatKey,
-    design_id: designId,
-    quantity,
-    active_from: activeFrom,
-  });
+  // 見 lib/market/listing.ts：如果貨架排在最後面的那個 slot 剛好跟這次要上架的品項一樣，
+  // 直接把數量累加上去，不新增一列（避免同款商品被自動補貨機制連續加成一長串重複列）。
+  const { error: slotError } = await upsertShelfSlot(admin, { shelfId, formatKey, designId, quantity, now });
   if (slotError) {
-    return NextResponse.json({ error: '上架失敗，請稍後再試' }, { status: 500 });
+    return NextResponse.json({ error: slotError }, { status: 500 });
   }
 
   const { error: inventoryError } = await admin

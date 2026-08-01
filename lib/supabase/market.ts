@@ -53,3 +53,14 @@ export async function fetchMarketOpenState(supabase: SupabaseClient, userId: str
   if (error) throw error;
   return { open: data?.market_open ?? true, closedAt: data?.market_closed_at ?? null };
 }
+
+// 手動上架／自動上架模式（見 lib/market/restock.ts）。
+export async function fetchMarketAutoRestockState(supabase: SupabaseClient, userId: string): Promise<boolean> {
+  const { data, error } = await supabase
+    .from('users')
+    .select('market_auto_restock')
+    .eq('id', userId)
+    .maybeSingle();
+  if (error) throw error;
+  return data?.market_auto_restock ?? false;
+}
