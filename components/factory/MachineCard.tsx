@@ -6,6 +6,7 @@ import { MAX_QUEUE_PER_MACHINE, type FactoryMachine } from '@/lib/factory/catalo
 import type { FactoryDesign, FactoryProductionBatch } from '@/types/database';
 import Countdown from './Countdown';
 import DesignThumb from './DesignThumb';
+import MachineScene, { type MachineStage } from './MachineScene';
 
 function QueueSlot({
   batch,
@@ -65,9 +66,37 @@ export default function MachineCard({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [now, setNow] = useState(() => Date.now());
+  // 收成流程的「打包中→已入庫」動畫覆蓋，跟被收成的那筆批次是否還存在於 batches 無關
+  // （router.refresh() 之後那筆批次就會從列表消失），所以不用 batchId 綁定，靠 timeout 自己收尾即可。
+  const [collectOverride, setCollectOverride] = useState<'collecting' | 'shipped' | null>(null);
+  const [collectFlourish, setCollectFlourish] = useState<{ name: string; quantity: number } | null>(null);
 
   const selectedFormat = machine.formats.find((f) => f.key === formatKey)!;
   const queueFull = batches.length >= MAX_QUEUE_PER_MACHINE;
+  const front = batches[0];
+  const frontFormat = front ? machine.formats.find((f) => f.key === front.format_key) : undefined;
+
+  let sceneStage: MachineStage = 'idle';
+  let sceneProgress = 0;
+  let sceneFormatName: string | undefined;
+  let sceneQuantity: number | undefined;
+
+  if (collectOverride) {
+    sceneStage = collectOverride;
+    sceneFormatName = collectFlourish?.name;
+    sceneQuantity = collectFlourish?.quantity;
+  } else if (front) {
+    const readyMs = new Date(front.ready_at).getTime();
+    const startedMs = new Date(front.started_at).getTime();
+    sceneFormatName = frontFormat?.name;
+    sceneQuantity = front.quantity;
+    if (readyMs <= now) {
+      sceneStage = 'ready';
+    } else {
+      sceneStage = 'processing';
+      sceneProgress = (now - startedMs) / Math.max(1, readyMs - startedMs);
+    }
+  }
 
   useEffect(() => {
     const interval = setInterval(() => setNow(Date.now()), 1000);
@@ -101,6 +130,10 @@ export default function MachineCard({
   async function handleCollect(batchId: number) {
     setError(null);
     setLoading(true);
+    const target = batches.find((b) => b.id === batchId);
+    const format = target ? machine.formats.find((f) => f.key === target.format_key) : undefined;
+    setCollectFlourish({ name: format?.name ?? '', quantity: target?.quantity ?? 0 });
+    setCollectOverride('collecting');
     try {
       const res = await fetch('/api/factory/collect', {
         method: 'POST',
@@ -109,8 +142,11 @@ export default function MachineCard({
       });
       const body = await res.json();
       if (!res.ok) throw new Error(body.error ?? '收成失敗');
+      setCollectOverride('shipped');
       router.refresh();
+      setTimeout(() => setCollectOverride(null), 1500);
     } catch (err) {
+      setCollectOverride(null);
       setError(err instanceof Error ? err.message : '收成失敗');
     } finally {
       setLoading(false);
@@ -125,6 +161,14 @@ export default function MachineCard({
           原料：{machine.materialName}（{machine.materialCost} 幣／份）・排隊 {batches.length}/{MAX_QUEUE_PER_MACHINE}
         </p>
       </div>
+
+      <MachineScene
+        machineKey={machine.key}
+        stage={sceneStage}
+        progress={sceneProgress}
+        formatName={sceneFormatName}
+        quantity={sceneQuantity}
+      />
 
       {error && <p className="text-xs text-red-600">{error}</p>}
 

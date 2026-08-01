@@ -70,6 +70,33 @@ export const FACTORY_MACHINES: FactoryMachine[] = [
   },
 ];
 
+// 開發測試用生產時間覆寫（2026-08-01，呼應 PROJECT_PROGRESS.md 第10-1項測試策略選項(b)：
+// 倒數秒數讀環境變數，本機開發設短、正式站設定為真實時長，兩邊跑同一套程式碼只有設定值不同）。
+// 只在 .env.local 設定 FACTORY_DEV_PRODUCTION_MINUTES 時生效；Vercel 正式站沒有這個變數，
+// 不會被意外影響到，千萬不要把這個變數加進 Vercel 的環境變數設定。
+const devProductionMinutesOverride = process.env.FACTORY_DEV_PRODUCTION_MINUTES
+  ? Number(process.env.FACTORY_DEV_PRODUCTION_MINUTES)
+  : null;
+
+if (devProductionMinutesOverride) {
+  for (const machine of FACTORY_MACHINES) {
+    for (const format of machine.formats) {
+      format.productionMinutes = devProductionMinutesOverride;
+    }
+  }
+}
+
+// ⚠️⚠️⚠️ 暫時性設定，2026-08-01 加入，測完就要刪掉這一整塊 ⚠️⚠️⚠️
+// Peggy 要去另一台電腦測試正式站（沒辦法用只在本機生效的 FACTORY_DEV_PRODUCTION_MINUTES），
+// 所以直接把「正式站的真實數值」也暫時改成 1 分鐘，這行會影響**所有訪問正式網站的人**，
+// 不是只有 Peggy 自己——目前網站沒有其他真實玩家在用，風險可接受，但務必記得測完就刪掉這段，
+// 讓生產時間恢復成上面 FACTORY_MACHINES 裡寫的真實數值（15~30分鐘）。
+for (const machine of FACTORY_MACHINES) {
+  for (const format of machine.formats) {
+    format.productionMinutes = 1;
+  }
+}
+
 export function findMachine(machineKey: string): FactoryMachine | undefined {
   return FACTORY_MACHINES.find((m) => m.key === machineKey);
 }

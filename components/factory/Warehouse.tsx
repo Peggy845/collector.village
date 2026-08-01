@@ -1,47 +1,31 @@
-'use client';
-
-import { useState } from 'react';
-import { useRouter } from 'next/navigation';
+import Link from 'next/link';
 import { findFormatByKey } from '@/lib/factory/catalog';
 import type { FactoryDesign, FactoryInventoryItem } from '@/types/database';
 import DesignThumb from './DesignThumb';
 
+// 工廠倉庫改成純展示（見 PROJECT_PROGRESS.md 已定案項目 32）：東西放在這裡不會自動變賣，
+// 想變現要去 /market 買貨架、上架。原本這裡的「全部賣掉」即時收購按鈕已經拿掉。
 export default function Warehouse({
   inventory,
   designs,
+  capacity,
 }: {
   inventory: FactoryInventoryItem[];
   designs: FactoryDesign[];
+  capacity: { used: number; total: number };
 }) {
-  const router = useRouter();
-  const [loadingId, setLoadingId] = useState<number | null>(null);
-  const [error, setError] = useState<string | null>(null);
-
   const designById = new Map(designs.map((d) => [d.id, d]));
-
-  async function handleSell(item: FactoryInventoryItem) {
-    setError(null);
-    setLoadingId(item.id);
-    try {
-      const res = await fetch('/api/factory/sell', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ formatKey: item.format_key, designId: item.design_id, quantity: item.quantity }),
-      });
-      const body = await res.json();
-      if (!res.ok) throw new Error(body.error ?? '賣出失敗');
-      router.refresh();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : '賣出失敗');
-    } finally {
-      setLoadingId(null);
-    }
-  }
+  const isFull = capacity.used >= capacity.total;
 
   return (
     <section>
-      <h2 className="mb-3 text-lg font-medium">工廠倉庫</h2>
-      {error && <p className="mb-2 text-sm text-red-600">{error}</p>}
+      <div className="mb-3 flex items-baseline justify-between">
+        <h2 className="text-lg font-medium">工廠倉庫</h2>
+        <p className={`text-xs ${isFull ? 'font-medium text-red-600' : 'text-neutral-500'}`}>
+          容量 {capacity.used}/{capacity.total}
+          {isFull && '・已滿，去超市上架清空間或升級倉庫'}
+        </p>
+      </div>
       {inventory.length === 0 ? (
         <p className="text-sm text-neutral-500">倉庫目前是空的，先去上面的機台生產一批看看。</p>
       ) : (
@@ -65,21 +49,18 @@ export default function Warehouse({
                   <p>
                     {format.name} × {item.quantity}
                   </p>
-                  <p className="text-xs text-neutral-500">全賣掉可得 {item.quantity * format.sellPricePerUnit} 幣</p>
                 </div>
-                <button
-                  type="button"
-                  disabled={loadingId === item.id}
-                  onClick={() => handleSell(item)}
-                  className="rounded border border-neutral-300 px-3 py-1.5 text-xs hover:border-neutral-500 disabled:opacity-50"
-                >
-                  {loadingId === item.id ? '賣出中…' : '全部賣掉'}
-                </button>
               </li>
             );
           })}
         </ul>
       )}
+      <Link
+        href="/market"
+        className="mt-3 inline-block rounded border border-neutral-300 px-3 py-1.5 text-xs hover:border-neutral-500"
+      >
+        去超市上架 →
+      </Link>
     </section>
   );
 }

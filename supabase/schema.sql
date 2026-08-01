@@ -74,7 +74,12 @@ create table if not exists public.users (
   created_at timestamp default now()
 );
 
--- 新使用者於 Supabase Auth 完成註冊時，自動建立對應的 public.users 列
+-- 新使用者於 Supabase Auth 完成註冊時，自動建立對應的 public.users 列，
+-- 並發放新手起始資源（2026-08-01 補充，見「已定案項目 32」超市系統）：起始遊戲幣 + 1 個免費貨架。
+-- 理由：拿掉原本工廠倉庫的「全部賣掉」即時收購功能後，玩家必須先有貨架才能把生產出來的東西變現，
+-- 但買貨架跟買生產原料都要花幣，新玩家帳上是 0 幣會卡死在「沒錢生產、沒錢買貨架」的雞生蛋問題，
+-- 所以開帳號當下就直接送一筆起始幣＋一個貨架，讓玩家能馬上開始玩，不用先想辦法生出第一筆錢。
+-- 起始幣/免費貨架的格數是草案數字，可以之後調整，不影響這個函式的邏輯結構。
 create or replace function public.handle_new_user()
 returns trigger
 language plpgsql
@@ -84,6 +89,13 @@ begin
   insert into public.users (id, email)
   values (new.id, new.email)
   on conflict (id) do nothing;
+
+  insert into public.game_currency_ledger (user_id, amount, reason)
+  values (new.id, 150, 'welcome_bonus');
+
+  insert into public.market_shelves (user_id, slot_capacity)
+  values (new.id, 2);
+
   return new;
 end;
 $$;
@@ -263,6 +275,66 @@ create table if not exists public.factory_inventory_items (
   updated_at timestamp default now(),
   unique (user_id, format_key, design_id)
 );
+
+-- =========================================
+-- 11. 超市系統 v1（見「已定案項目 32」：貨架計時器＋倉庫容量上限）
+-- =========================================
+-- 設計核心：跟工廠生產佇列（見上方第10節）用同一套「不跑背景排程，讀取時用時間差計算」的做法。
+-- 一個貨架(market_shelves)最多同時放 slot_capacity 種商品(market_shelf_slots)；每個 slot 的
+-- active_from 在「上架當下」就算好、之後不再變動（跟工廠 ready_at 是同一個精神：新排的 slot
+-- 接在同一貨架前一個 slot 的「預計賣完時間」之後才開始算，貨架前面沒東西賣就從現在開始算）。
+-- 每分鐘賣 1 件是貨架整體共用（不是每個 slot 各自），所以同一貨架同時只有一個 slot 在賣，
+-- 其餘 slot 依 slot_index 排隊等前面的賣完(以排程時間判斷，不需要玩家真的按「收款」才輪到下一個，
+-- 呼應工廠佇列「前一批沒收成也不擋下一批開始跑」的既有邏輯)。
+-- 「賣了多少、該入帳多少遊戲幣」不是即時累加的背景工作，而是玩家按「收款」時，用
+-- （目前用 active_from+quantity 算出的已售數量 - collected_quantity 已入帳過的數量）算出差額才入帳，
+-- 這個差額算法是冪等的（同一秒內按兩次收款，第二次差額是0，不會重複入帳）。
+
+-- 工廠倉庫容量上限：促成「倉庫爆倉→得去超市上架清空間或花錢升級倉庫」的資源壓力循環，
+-- 呼應「已定案項目 32」。草案數字（可調整）：預設 300、每次升級 +50，升級費用見 lib/market/catalog.ts。
+alter table public.users add column if not exists warehouse_capacity int not null default 300;
+
+-- 超市營業中／暫停營業（2026-08-01 補充，見「已定案項目 32」）：全站只有一個開關，不分貨架。
+-- 暫停營業時所有貨架的倒數都凍結，玩家仍可上架/下架，只是不會有東西被賣掉。
+-- market_closed_at 只在暫停營業期間有值，重新營業時用「現在時間 - market_closed_at」算出暫停了多久，
+-- 把使用者名下所有 slot 的 active_from 整批往後推移同樣的時間量，讓「凍結」的效果延續到重新營業後
+-- （不需要另外記錄多段暫停區間，見 app/api/market/toggle-open/route.ts 的實作說明）。
+alter table public.users add column if not exists market_open boolean not null default true;
+alter table public.users add column if not exists market_closed_at timestamptz;
+
+create table if not exists public.market_shelves (
+  id serial primary key,
+  user_id uuid references public.users(id) on delete cascade not null,
+  capacity int not null,                     -- 貨架容量以「總件數」計算，不分商品種類（2026-08-01 修正，
+                                              -- 原本誤設計成「最多幾種商品」，改成「總共能放幾件」，
+                                              -- 玩家可以自由分配要放幾種、各放幾件，只要總數不超過容量）
+  created_at timestamp default now()
+);
+
+create table if not exists public.market_shelf_slots (
+  id serial primary key,
+  shelf_id int references public.market_shelves(id) on delete cascade not null,
+  format_key text not null,
+  design_id int references public.factory_designs(id) not null,
+  quantity int not null,                     -- 上架當下的原始數量，之後不變動（賣掉多少用 active_from 推算）
+  collected_quantity int not null default 0, -- 已經按過「收款」入帳的數量，見上方冪等入帳設計
+  active_from timestamptz not null,          -- 這個 slot 實際開始倒數賣出的時間點，上架當下算好後不再變動
+  listed_at timestamp default now()          -- 純記錄用，上架的當下時間（跟 active_from 不同，可能要排隊等）
+);
+
+-- 2026-08-01 修正：拿掉原本「slot_index 代表第幾個固定格子」的設計（容量已經改成算總件數，
+-- 不再有固定格數的概念），已存在的資料庫如果還有舊欄位就在這裡清掉，新建的表不會有這個欄位。
+do $$
+begin
+  if exists (
+    select 1 from information_schema.columns
+    where table_schema = 'public' and table_name = 'market_shelves' and column_name = 'slot_capacity'
+  ) then
+    alter table public.market_shelves rename column slot_capacity to capacity;
+  end if;
+end $$;
+alter table public.market_shelf_slots drop column if exists slot_index;
+update public.market_shelves set capacity = 10 where capacity = 2;
 
 -- =========================================
 -- Row Level Security
@@ -447,6 +519,18 @@ alter table public.factory_inventory_items enable row level security;
 drop policy if exists "own inventory select" on public.factory_inventory_items;
 create policy "own inventory select" on public.factory_inventory_items
   for select using (auth.uid() = user_id);
+
+-- market_shelves / market_shelf_slots：使用者只能查看自己的紀錄，寫入（買貨架／上架／下架／收款）
+-- 一律透過 app/api/market/* 路由用 service role 執行，理由跟工廠系統一致（見上方說明）。
+alter table public.market_shelves enable row level security;
+drop policy if exists "own shelves select" on public.market_shelves;
+create policy "own shelves select" on public.market_shelves
+  for select using (auth.uid() = user_id);
+
+alter table public.market_shelf_slots enable row level security;
+drop policy if exists "own shelf slots select" on public.market_shelf_slots;
+create policy "own shelf slots select" on public.market_shelf_slots
+  for select using (auth.uid() = (select user_id from public.market_shelves where id = shelf_id));
 
 -- =========================================
 -- Storage：collection-photos bucket

@@ -53,6 +53,9 @@ export interface UserProfile {
   username: string | null;
   email: string | null;
   social_links: Record<string, string> | null;
+  warehouse_capacity: number;
+  market_open: boolean;
+  market_closed_at: string | null;
   created_at: string;
 }
 
@@ -161,4 +164,22 @@ export interface FactoryInventoryItem {
   design_id: number;
   quantity: number;
   updated_at: string;
+}
+
+export interface MarketShelf {
+  id: number;
+  user_id: string;
+  capacity: number;
+  created_at: string;
+}
+
+export interface MarketShelfSlot {
+  id: number;
+  shelf_id: number;
+  format_key: FormatKey;
+  design_id: number;
+  quantity: number;
+  collected_quantity: number;
+  active_from: string;
+  listed_at: string;
 }

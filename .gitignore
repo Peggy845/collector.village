@@ -12,3 +12,6 @@ npm-debug.log*
 
 # 本機審核用資料夾，正式素材審核通過後用腳本上傳到 Supabase Storage，不進 git（見 PROJECT_PROGRESS.md 已知缺口第4項的既有慣例）
 local-assets/
+
+# 討論用手繪稿/截圖/參考影片 + 開發日誌，純本機參考，不進 git（2026-08-01）
+idea/

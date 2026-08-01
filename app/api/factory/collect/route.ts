@@ -1,9 +1,13 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { createAdminClient } from '@/lib/supabase/admin';
+import { fetchWarehouseCapacity } from '@/lib/supabase/market';
 import type { FactoryProductionBatch } from '@/types/database';
 
 // 收成：把生產批次標記為 collected，並把數量疊加進工廠倉庫庫存。
+// 倉庫有容量上限（見 PROJECT_PROGRESS.md 已定案項目 32），收成前先檢查會不會超過上限，
+// 超過就擋下來——這是刻意的設計，逼玩家要嘛先去超市上架清空間、要嘛花錢升級倉庫，
+// 不能無限生產又不處理，是「工廠↔超市」資源循環成立的關鍵。
 export async function POST(request: Request) {
   const supabase = await createClient();
   const {
@@ -35,6 +39,18 @@ export async function POST(request: Request) {
   }
   if (new Date(typedBatch.ready_at).getTime() > Date.now()) {
     return NextResponse.json({ error: '還沒生產完成，請再等一下' }, { status: 400 });
+  }
+
+  const { data: inventoryRows } = await admin.from('factory_inventory_items').select('quantity').eq('user_id', user.id);
+  const currentTotal = (inventoryRows ?? []).reduce((sum, row) => sum + row.quantity, 0);
+  const capacity = await fetchWarehouseCapacity(admin, user.id);
+  if (currentTotal + typedBatch.quantity > capacity) {
+    return NextResponse.json(
+      {
+        error: `工廠倉庫放不下了（目前 ${currentTotal}/${capacity}），請先去超市上架清出空間，或花錢升級倉庫容量`,
+      },
+      { status: 400 }
+    );
   }
 
   const { error: batchError } = await admin

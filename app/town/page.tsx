@@ -13,10 +13,10 @@ const OPEN_BUILDINGS = [
   { href: '/browse', emoji: '🏠', name: '家', desc: '收藏庫瀏覽與想要清單' },
   { href: '/albums', emoji: '📔', name: '收納冊', desc: '整理收藏、產生分享連結' },
   { href: '/factory', emoji: '🏭', name: '工廠', desc: '生產二創周邊、賺遊戲幣' },
+  { href: '/market', emoji: '🏪', name: '超市', desc: '上架貨架，把成品變現' },
 ];
 
 const FUTURE_BUILDINGS = [
-  { emoji: '🏪', name: '超市' },
   { emoji: '🎪', name: '市集' },
   { emoji: '👗', name: '服飾店' },
 ];
