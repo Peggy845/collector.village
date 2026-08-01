@@ -11,6 +11,7 @@ import MachineScene, { type MachineStage } from './MachineScene';
 function QueueSlot({
   batch,
   machine,
+  design,
   now,
   isActive,
   onCollect,
@@ -18,6 +19,7 @@ function QueueSlot({
 }: {
   batch: FactoryProductionBatch;
   machine: FactoryMachine;
+  design: FactoryDesign | undefined;
   now: number;
   isActive: boolean;
   onCollect: (batchId: number) => void;
@@ -27,26 +29,29 @@ function QueueSlot({
   const format = machine.formats.find((f) => f.key === batch.format_key);
 
   return (
-    <div className="flex flex-col gap-2 rounded border border-neutral-200 bg-neutral-50 p-3 text-sm">
-      <p>
-        {format?.name} × {batch.quantity}
-      </p>
-      {isReady ? (
-        <button
-          type="button"
-          disabled={loading}
-          onClick={() => onCollect(batch.id)}
-          className="self-start rounded bg-neutral-900 px-4 py-2 text-sm text-white disabled:opacity-50"
-        >
-          {loading ? '收成中…' : '收成'}
-        </button>
-      ) : isActive ? (
-        <p className="text-neutral-600">
-          <Countdown readyAt={batch.ready_at} />
+    <div className="flex items-center gap-3 rounded border border-neutral-200 bg-neutral-50 p-3 text-sm">
+      {design && <DesignThumb design={design} className="h-10 w-10 shrink-0 rounded border border-neutral-200 object-cover" />}
+      <div className="flex flex-1 flex-col gap-2">
+        <p>
+          {design?.name ?? '設計圖'}・{format?.name} × {batch.quantity}
         </p>
-      ) : (
-        <p className="text-neutral-400">排隊中・輪到它開始生產後約需 {format?.productionMinutes} 分鐘</p>
-      )}
+        {isReady ? (
+          <button
+            type="button"
+            disabled={loading}
+            onClick={() => onCollect(batch.id)}
+            className="self-start rounded bg-neutral-900 px-4 py-2 text-sm text-white disabled:opacity-50"
+          >
+            {loading ? '收成中…' : '收成'}
+          </button>
+        ) : isActive ? (
+          <p className="text-neutral-600">
+            <Countdown readyAt={batch.ready_at} />
+          </p>
+        ) : (
+          <p className="text-neutral-400">排隊中・輪到它開始生產後約需 {format?.productionMinutes} 分鐘</p>
+        )}
+      </div>
     </div>
   );
 }
@@ -69,25 +74,31 @@ export default function MachineCard({
   // 收成流程的「打包中→已入庫」動畫覆蓋，跟被收成的那筆批次是否還存在於 batches 無關
   // （router.refresh() 之後那筆批次就會從列表消失），所以不用 batchId 綁定，靠 timeout 自己收尾即可。
   const [collectOverride, setCollectOverride] = useState<'collecting' | 'shipped' | null>(null);
-  const [collectFlourish, setCollectFlourish] = useState<{ name: string; quantity: number } | null>(null);
+  const [collectFlourish, setCollectFlourish] = useState<{ name: string; designName: string; quantity: number } | null>(
+    null,
+  );
 
   const selectedFormat = machine.formats.find((f) => f.key === formatKey)!;
   const queueFull = batches.length >= MAX_QUEUE_PER_MACHINE;
   const front = batches[0];
   const frontFormat = front ? machine.formats.find((f) => f.key === front.format_key) : undefined;
+  const frontDesign = front ? designs.find((d) => d.id === front.design_id) : undefined;
 
   let sceneStage: MachineStage = 'idle';
   let sceneProgress = 0;
+  let sceneDesignName: string | undefined;
   let sceneFormatName: string | undefined;
   let sceneQuantity: number | undefined;
 
   if (collectOverride) {
     sceneStage = collectOverride;
+    sceneDesignName = collectFlourish?.designName;
     sceneFormatName = collectFlourish?.name;
     sceneQuantity = collectFlourish?.quantity;
   } else if (front) {
     const readyMs = new Date(front.ready_at).getTime();
     const startedMs = new Date(front.started_at).getTime();
+    sceneDesignName = frontDesign?.name ?? undefined;
     sceneFormatName = frontFormat?.name;
     sceneQuantity = front.quantity;
     if (readyMs <= now) {
@@ -132,7 +143,8 @@ export default function MachineCard({
     setLoading(true);
     const target = batches.find((b) => b.id === batchId);
     const format = target ? machine.formats.find((f) => f.key === target.format_key) : undefined;
-    setCollectFlourish({ name: format?.name ?? '', quantity: target?.quantity ?? 0 });
+    const design = target ? designs.find((d) => d.id === target.design_id) : undefined;
+    setCollectFlourish({ name: format?.name ?? '', designName: design?.name ?? '', quantity: target?.quantity ?? 0 });
     setCollectOverride('collecting');
     try {
       const res = await fetch('/api/factory/collect', {
@@ -166,6 +178,7 @@ export default function MachineCard({
         machineKey={machine.key}
         stage={sceneStage}
         progress={sceneProgress}
+        designName={sceneDesignName}
         formatName={sceneFormatName}
         quantity={sceneQuantity}
       />
@@ -180,11 +193,13 @@ export default function MachineCard({
             // 前一項的 ready_at 有沒有到，就能判斷這一項是不是已經輪到它。
             const previous = batches[index - 1];
             const isActive = !previous || new Date(previous.ready_at).getTime() <= now;
+            const design = designs.find((d) => d.id === batch.design_id);
             return (
               <QueueSlot
                 key={batch.id}
                 batch={batch}
                 machine={machine}
+                design={design}
                 now={now}
                 isActive={isActive}
                 onCollect={handleCollect}

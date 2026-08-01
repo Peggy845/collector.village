@@ -38,6 +38,7 @@ export default function MachineScene({
   machineKey,
   stage,
   progress = 0,
+  designName,
   formatName,
   quantity,
 }: {
@@ -45,6 +46,7 @@ export default function MachineScene({
   stage: MachineStage;
   /** 0~1，只在 processing 階段用來畫進度條，其餘階段忽略 */
   progress?: number;
+  designName?: string;
   formatName?: string;
   quantity?: number;
 }) {
@@ -67,7 +69,7 @@ export default function MachineScene({
       <div className="min-w-0 flex-1">
         <p className={`text-xs ${stage === 'ready' ? 'font-medium text-neutral-800' : 'text-neutral-600'}`}>
           {STAGE_LABEL[stage]}
-          {formatName && quantity ? `・${formatName} × ${quantity}` : ''}
+          {formatName && quantity ? `・${designName ? `${designName}・` : ''}${formatName} × ${quantity}` : ''}
         </p>
         {stage === 'processing' && (
           <div className="mt-1.5 h-1.5 w-full overflow-hidden rounded-full bg-white/70">

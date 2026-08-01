@@ -43,7 +43,7 @@ export default async function FactoryPage() {
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <h1 className="text-2xl font-semibold">工廠</h1>
-          <p className="mt-1 text-sm text-neutral-500">買材料、選圖案，生產屬於你的二創周邊。</p>
+          <p className="mt-1 text-sm text-neutral-500">買材料、選圖案，生產屬於你的周邊。</p>
         </div>
         <CollectAllButton />
       </div>

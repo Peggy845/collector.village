@@ -190,6 +190,7 @@ export default function ShelfCard({
   const router = useRouter();
   const [now, setNow] = useState(() => Date.now());
   const [loading, setLoading] = useState(false);
+  const [autoFilling, setAutoFilling] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -226,6 +227,41 @@ export default function ShelfCard({
     }
   }
 
+  // 自動上架（見 idea/貨架補滿.png）：從待上架清單最上面那項開始，依序把空位補滿——
+  // 最上面的項目庫存夠就整批扣掉補滿空位，不夠就扣完接著換下一項繼續補，
+  // 不用玩家自己一項項湊數字。沿用既有的 /api/market/list 逐筆呼叫，不用另外做批次API。
+  async function handleAutoFill() {
+    if (freeSpace <= 0 || inventory.length === 0) return;
+    setError(null);
+    setAutoFilling(true);
+    let remaining = freeSpace;
+    try {
+      for (const item of inventory) {
+        if (remaining <= 0) break;
+        const quantity = Math.min(item.quantity, remaining);
+        if (quantity <= 0) continue;
+        const res = await fetch('/api/market/list', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            shelfId: shelf.id,
+            formatKey: item.format_key,
+            designId: item.design_id,
+            quantity,
+          }),
+        });
+        const body = await res.json();
+        if (!res.ok) throw new Error(body.error ?? '自動上架失敗');
+        remaining -= quantity;
+      }
+      router.refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '自動上架失敗');
+    } finally {
+      setAutoFilling(false);
+    }
+  }
+
   return (
     <div className="flex flex-col gap-3 rounded-lg border border-neutral-200 p-5">
       <div className="flex items-baseline justify-between">
@@ -240,9 +276,19 @@ export default function ShelfCard({
             {marketOpen ? '販賣中' : '商店關閉中'}
           </span>
         </div>
-        <p className="text-xs text-neutral-500">
-          空位 {freeSpace}/{shelf.capacity}
-        </p>
+        <div className="flex items-center gap-2">
+          <p className="text-xs text-neutral-500">
+            空位 {freeSpace}/{shelf.capacity}
+          </p>
+          <button
+            type="button"
+            disabled={autoFilling || freeSpace <= 0 || inventory.length === 0}
+            onClick={handleAutoFill}
+            className="rounded border border-neutral-300 px-2 py-1 text-xs hover:border-neutral-500 disabled:opacity-50"
+          >
+            {autoFilling ? '上架中…' : '自動上架'}
+          </button>
+        </div>
       </div>
 
       {error && <p className="text-xs text-red-600">{error}</p>}
