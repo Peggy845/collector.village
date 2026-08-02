@@ -15,13 +15,15 @@ export const metadata: Metadata = {
   robots: { index: false, follow: false },
 };
 
-export default async function FactoryPage() {
+export default async function FactoryPage({ searchParams }: { searchParams: Promise<{ designId?: string }> }) {
   const supabase = await createClient();
   const user = await requireUser(supabase, '/factory');
+  const { designId } = await searchParams;
+  const initialDesignId = designId ? Number(designId) : null;
 
   const [balance, designs, batches, inventory, warehouseCapacity] = await Promise.all([
     fetchCurrencyBalance(supabase, user.id),
-    fetchFactoryDesigns(supabase),
+    fetchFactoryDesigns(supabase, user.id),
     fetchActiveProductionBatches(supabase, user.id),
     fetchInventory(supabase, user.id),
     fetchWarehouseCapacity(supabase, user.id),
@@ -67,6 +69,7 @@ export default async function FactoryPage() {
                 machine={machine}
                 designs={designs}
                 batches={batchesByMachine.get(machine.key) ?? []}
+                initialDesignId={initialDesignId}
               />
             ))}
           </div>

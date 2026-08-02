@@ -60,14 +60,17 @@ export default function MachineCard({
   machine,
   designs,
   batches,
+  initialDesignId,
 }: {
   machine: FactoryMachine;
   designs: FactoryDesign[];
   batches: FactoryProductionBatch[];
+  /** 從設計坊「直接生產」帶過來的預選設計圖 id（見 app/factory/page.tsx 的 ?designId= 參數） */
+  initialDesignId?: number | null;
 }) {
   const router = useRouter();
   const [formatKey, setFormatKey] = useState(machine.formats[0].key);
-  const [designId, setDesignId] = useState<number | null>(null);
+  const [designId, setDesignId] = useState<number | null>(initialDesignId ?? null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [now, setNow] = useState(() => Date.now());

@@ -342,6 +342,56 @@ alter table public.market_shelf_slots drop column if exists slot_index;
 update public.market_shelves set capacity = 10 where capacity = 2;
 
 -- =========================================
+-- 12. 設計坊系統 v1（玩家自繪像素設計圖庫，見 idea/project-brief.md 第4、7、9節）
+-- =========================================
+-- 法律風險緩解的核心是「創作工具本身受限」：24×24固定網格＋13色固定色票（含1色透明橡皮擦），
+-- 只能逐格點擊/拖曳上色，不開放自由曲線或圖片上傳（見 project-brief.md 第4節demo驗證結果）。
+-- 網格大小、色票內容寫死在 lib/design-studio/palette.ts（跟 lib/factory/catalog.ts 同精神：
+-- 這是遊戲規則常數，不需要玩家或管理者透過網頁調整）。
+
+-- player_designs：玩家個人設計庫的正本（能不能繼續編輯、命名、佔不佔容量上限，都由這張表決定）。
+-- 刻意跟 factory_designs（生產管線引用的、不可變版本快照）分開，理由：factory_designs.is_active
+-- 現有語意是「管理員全站下架」，跟這裡「玩家自己的圖庫還留著沒有」是兩件不同的事，混在同一個
+-- 布林欄位上，將來做檢舉/下架機制時會分不清楚是誰下架、為何下架（見 project-brief.md 第七節）。
+create table if not exists public.player_designs (
+  id serial primary key,
+  user_id uuid references public.users(id) on delete cascade not null,
+  name text not null,
+  pixel_data jsonb not null,                   -- 24×24=576格攤平成一維陣列，每格存調色盤索引
+                                                 -- （0=透明/橡皮擦），單張僅數百bytes，容量非考量
+  is_watermark boolean not null default false,  -- 「儲存為浮水印」即這裡一筆 is_watermark=true 的紀錄；
+                                                 -- 「添加浮水印」是畫布端把這筆 pixel_data 疊加進目前畫布，
+                                                 -- 純前端合成，v1先建欄位、UI留到之後再做
+  status text not null default 'library',       -- 'library'（正常算容量、顯示在設計庫）／
+                                                 -- 'temp'（「直接生產」產生，不顯示、不算容量，但保留
+                                                 -- 底層資料到這批生產的商品做完且賣完，不做真的刪除，
+                                                 -- 2026-08-02 跟 Peggy 確認過的做法）
+  current_factory_design_id int references public.factory_designs(id),
+                                                 -- 指向這筆圖庫項目「目前最新版本」對應的 factory_designs
+                                                 -- 快照列，供「匯入設計」讀回像素資料、繼續生產。覆蓋儲存
+                                                 -- 時這個指標換成新插入的 factory_designs 列，舊列不變動，
+                                                 -- 讓覆蓋之前就已經生產/上架的商品畫面維持顯示舊圖
+  created_at timestamp default now(),
+  updated_at timestamp default now()
+);
+create index if not exists player_designs_user_id_status_idx on public.player_designs(user_id, status);
+
+-- factory_designs 擴充（沿用既有表，不建第二個生產快照表）：讓玩家自繪設計也能寫進這張表，
+-- 維持「下游生產鏈（factory_production_batches／factory_inventory_items／market_shelf_slots）
+-- 全部只認 factory_designs.id」的既有結構完全不變。每次「儲存設計」「覆蓋」「直接生產」都在這裡
+-- 新插入一列（不更新既有列），讓 factory_designs 維持「不可變版本快照」——跟 game_currency_ledger
+-- 「只累加不修改」同精神，只是這裡累加的是「版本」而非「金額」。
+alter table public.factory_designs add column if not exists user_id uuid references public.users(id) on delete cascade;
+alter table public.factory_designs add column if not exists player_design_id int references public.player_designs(id) on delete set null;
+-- user_id 為 null＝既有管理員全站圖庫（v1原本4筆），語意不變；
+-- user_id 有值＝玩家在設計坊畫的一張快照，只有本人能在工廠選用（見下方 RLS 修正）。
+create index if not exists factory_designs_user_id_idx on public.factory_designs(user_id);
+
+-- 設計庫容量上限：不是為了資料庫儲存成本（單張僅數百bytes），是為了未來檢舉/巡查機制的可行性，
+-- 避免單一帳號的設計總量無限累積（見 project-brief.md 第九節）。草案數字50，可調整。
+alter table public.users add column if not exists design_library_capacity int not null default 50;
+
+-- =========================================
 -- Row Level Security
 -- =========================================
 
@@ -507,10 +557,25 @@ create policy "own photo submissions delete pending" on public.product_photo_sub
 drop policy if exists "own ledger select" on public.game_currency_ledger;
 create policy "own ledger select" on public.game_currency_ledger for select using (auth.uid() = user_id);
 
--- factory_designs：全站玩家皆可讀（挑圖用），寫入僅限 service role（add-factory-design.mjs 腳本）
+-- factory_designs：管理員全站圖庫（user_id為null）全站玩家皆可讀（挑圖用）；玩家自畫的列
+-- （user_id有值）只有本人能讀。寫入僅限 service role（add-factory-design.mjs 腳本／
+-- app/api/design-studio/* 路由）。
+-- 2026-08-02 安全修正：原本的政策是 `using (is_active)`，對所有人（含匿名）完全開放——
+-- 這張表一旦開始存玩家自繪的列，任何人都能用匿名金鑰直接撈到別人的 user_id 對應設計，
+-- 繞過「只能自己用自己畫的圖生產」這條規則，故加上 user_id 的判斷條件。
 alter table public.factory_designs enable row level security;
 drop policy if exists "factory designs readable by everyone" on public.factory_designs;
-create policy "factory designs readable by everyone" on public.factory_designs for select using (is_active);
+drop policy if exists "factory designs readable by everyone or own" on public.factory_designs;
+create policy "factory designs readable by everyone or own" on public.factory_designs
+  for select using (is_active and (user_id is null or user_id = auth.uid()));
+
+-- player_designs：使用者只能查看自己的設計庫，寫入（存檔/覆蓋/直接生產）一律透過
+-- app/api/design-studio/* 路由用 service role 執行，理由跟工廠/超市經濟資料表一致
+-- （容量上限需要伺服器端信任的驗證，不能只靠前端自我限制）。
+alter table public.player_designs enable row level security;
+drop policy if exists "own player designs select" on public.player_designs;
+create policy "own player designs select" on public.player_designs
+  for select using (auth.uid() = user_id);
 
 -- factory_production_batches / factory_inventory_items：使用者只能查看自己的紀錄，
 -- 寫入（開始生產／收成／賣出）一律透過 app/api/factory/* 路由用 service role 執行，
@@ -604,3 +669,38 @@ create policy "own pending photo submissions delete" on storage.objects for dele
 insert into storage.buckets (id, name, public)
 values ('factory-designs', 'factory-designs', true)
 on conflict (id) do nothing;
+
+-- =========================================
+-- Storage：player-designs bucket（設計坊系統 v1，見上方第12節）
+-- =========================================
+-- public bucket，跟 factory-designs／product-photos 同一層級：這些圖本來就要透過既有 DesignThumb
+-- 的同步公開URL邏輯，顯示在工廠選圖器／倉庫／貨架，2026-08-02 已跟 Peggy 確認公開bucket的做法
+-- （目前站內沒有「瀏覽別人商店」的功能，真正的風險緩解手段是畫圖工具本身的網格/色票限制，
+-- 不是網址難猜；如果之後要做跨玩家瀏覽功能，屆時再重新評估要不要改成私密bucket＋簽名網址）。
+-- 路徑規則 user_id/檔名，玩家透過瀏覽器端 Supabase client 直接上傳圖片檔案本身（比照
+-- collection-photos 的路徑慣例與RLS寫法），但 player_designs／factory_designs 的資料表寫入
+-- 一律透過 service role API 執行（見上方第12節RLS說明），瀏覽器上傳權限只管圖檔本身。
+
+insert into storage.buckets (id, name, public)
+values ('player-designs', 'player-designs', true)
+on conflict (id) do nothing;
+
+-- 2026-08-02 debug 補充：一開始以為「public bucket 讀取不需要政策」，但那只適用於直接打公開
+-- 網址下載檔案內容那條路徑；瀏覽器端 `supabase.storage.upload(path, blob, {upsert:true})`
+-- 走的是一般 RLS 保護的 API，upsert 需要能先確認該路徑的 metadata 列存不存在（等同一次
+-- select），沒有 select policy 時整個 upload 會被 RLS 擋下、回傳「new row violates row-level
+-- security policy」（一開始不容易看出真正原因是缺 select policy，因為錯誤訊息長得像 insert 被擋）。
+drop policy if exists "own player design uploads select" on storage.objects;
+create policy "own player design uploads select" on storage.objects for select
+  using (bucket_id = 'player-designs' and (storage.foldername(name))[1] = auth.uid()::text);
+
+drop policy if exists "own player design uploads insert" on storage.objects;
+create policy "own player design uploads insert" on storage.objects for insert
+  with check (bucket_id = 'player-designs' and (storage.foldername(name))[1] = auth.uid()::text);
+
+drop policy if exists "own player design uploads update" on storage.objects;
+create policy "own player design uploads update" on storage.objects for update
+  using (bucket_id = 'player-designs' and (storage.foldername(name))[1] = auth.uid()::text);
+
+-- 不提供 delete policy——圖片跟 factory_designs 快照列一樣，只隱藏不刪除，
+-- 理由同上方 player_designs.status='temp' 的說明。

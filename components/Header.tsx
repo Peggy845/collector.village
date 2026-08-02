@@ -81,6 +81,9 @@ export default function Header() {
               <Link href="/albums" className="text-neutral-600 hover:text-neutral-900">
                 我的收納冊
               </Link>
+              <Link href="/design-studio" className="text-neutral-600 hover:text-neutral-900">
+                設計坊
+              </Link>
               <Link href="/factory" className="text-neutral-600 hover:text-neutral-900">
                 工廠
               </Link>

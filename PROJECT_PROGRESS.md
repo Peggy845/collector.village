@@ -666,6 +666,22 @@ Vercel 專案 `qa-clinic-taiwan/collector-village` 是沿用舊靜態佔位頁�
 - **新增 `scripts/lib/csv-import.test.ts`（19個測試）**：涵蓋 CSV 解析（含引號跳脫、空白列）、欄位擷取、驗證規則（必填/日期格式會擋、其餘規則只列警告）、查重 key 組合、資料庫寫入格式轉換、以及「已審核」分隔列的抓取（找不到/找到/分隔列後沒資料等情境）。
 - **刻意沒做的**：沒有寫串接真實 Supabase 的整合測試（原因同上，不能拿正式資料庫測試），Supabase 讀寫的膠水程式碼本身沿用原本腳本已經跑過402筆真實資料驗證過的寫法，只是新增了對稱的 update 呼叫。`node --check` 確認兩個檔案語法正確，`tsc`／`lint`／`build`／`npm run test` 皆過。**這支腳本本身完全沒有拿去對正式資料庫執行過**，等 Peggy 真的校對完、CSV 出現「已審核」區塊時才會是第一次實際使用，屆時建議先用少量資料試跑一次確認符合預期。
 
+### 設計坊系統 v1（Phase 0~4 全部完成，2026-08-02，見 `idea/設計坊.png`、`idea/project-brief.md` 第4/7/9節）
+
+- **背景**：`project-brief.md` 早在工廠系統開發前就針對「玩家自己畫設計圖」做過完整的法律風險分析，結論是「即時像素工坊」（24×24固定網格＋13色固定色票，不開放自由畫筆/圖片上傳），但當時被列為 v2 沒有排入開發。這次 Peggy 畫了 `idea/設計坊.png` 線框圖確認要開始做，完整規劃討論記在 `C:\Users\Peggy\.claude\plans\kind-whistling-quasar.md`（Claude Code 的 plan mode 產出），這裡只記重點決策跟開發過程。
+- **關鍵架構決定**：新增 `player_designs` 表當玩家個人設計庫正本；`factory_designs`（原本管理員全站圖庫）擴充 `user_id`／`player_design_id` 欄位，變成「不可變版本快照」——每次存檔/覆蓋都新插入一列不更新舊列，讓已經生產/上架過的舊商品畫面不會因為玩家事後覆蓋設計而跟著變。**同時修掉一個既有安全漏洞**：`factory_designs` 原本的 RLS select 政策對所有人完全開放，這次收斂成「管理員圖庫全開、玩家自畫的只有本人能看」。
+- **Storage bucket**：新增 `player-designs`（公開bucket，跟 `factory-designs`/`product-photos` 同層級，理由跟工廠圖庫一樣不需要簽名網址），路徑規則 `user_id/檔名`。
+  - **踩到一個不容易查的坑**：一開始只給這個bucket INSERT/UPDATE政策、沒給SELECT政策（想說「公開bucket讀取不需要政策」），結果瀏覽器端 `supabase.storage.upload(path, blob, {upsert:true})` 一路回報「new row violates row-level security policy」，訊息長得像INSERT被擋，但花了很長時間逐層排查（直接對 Postgres 模擬 `auth.uid()`／RLS政策評估，確認政策邏輯本身沒錯）才發現：「public bucket讀取不需要政策」只適用於直接打公開網址下載檔案內容那條路徑，瀏覽器端SDK的 `upload` 因為 `upsert:true` 需要先確認路徑存不存在（等同一次select查詢），沒有select政策時就會被RLS擋下、回傳看起來像insert被拒的錯誤訊息。補上 select 政策後正常。**教訓：之後如果又要開一個「玩家可以直接上傳」的public bucket，SELECT/INSERT/UPDATE三個政策要一起給，不能因為是public bucket就以為只需要寫入政策。**
+- **Phase 0（資料庫地基）+ Phase 1（最小垂直切片）已完成並實測**：`lib/design-studio/palette.ts`（24×24網格/13色色票規則）、`lib/design-studio/render.ts`（像素陣列→PNG渲染）、`lib/supabase/design-studio.ts`、`lib/factory/startProduction.ts`（把工廠開始生產的邏輯抽成共用函式，`/api/factory/start` 跟之後的「直接生產」都會用到）、陽春版 `PixelCanvas`/`PaletteBar`、`/design-studio` 頁面（只接「儲存設計」，還沒做覆蓋/匯入/浮水印/直接生產）。
+- **已驗證完整流程**：用既有測試帳號實際畫了一張圖存檔（設計庫 0/50 → 1/50）、到 `/factory` 選圖器正確只看到管理員4張圖庫+自己剛畫的這張、選它生產「海報×4」、等待完成、收成、工廠倉庫正確用既有 `DesignThumb` 元件顯示縮圖（沒有另外改 `DesignThumb` 的顯示邏輯，只加了 bucket 路由判斷）。全程沒有動到既有工廠/超市互動邏輯。
+- **Phase 2（設計庫完整功能）**：新增 `MiniPixelPreview.tsx`（直接用像素陣列即時畫縮圖，不用等圖片上傳/下載）、`DesignLibraryModal.tsx`（查看設計庫／匯入設計／容量滿了時選要覆蓋哪張，共用同一個元件，用 `mode` 參數區分）。「儲存設計」失敗訊息包含「設計庫已滿」時自動彈出覆蓋選擇視窗，不用玩家自己再點一次重試。
+  - **已驗證**：查看設計庫正確列出所有已存設計（含縮圖）；匯入設計能把像素資料完整讀回畫布繼續編輯；暫時把測試帳號的 `design_library_capacity` 調成2觸發容量滿了的情境，確認會自動彈出覆蓋選擇視窗，選一張覆蓋後設計庫數量不會增加（維持2/2，不是3/2），覆蓋完成後容量已改回50。
+- **Phase 3（直接生產）**：新增 `app/api/design-studio/produce/route.ts`（只建立 `status='temp'` 的暫存設計快照，不檢查容量、不算進設計庫），畫完點「直接生產」會導去 `/factory?designId=...`；`MachineCard.tsx` 新增 `initialDesignId` prop，`app/factory/page.tsx` 讀 `searchParams.designId` 傳進去，讓工廠頁的選圖器自動預選這張暫存設計（沿用既有機台/格式選擇器，沒有另外做一套）。
+  - **已驗證**：畫一張圖點「直接生產」，正確導到工廠頁且該設計已被預選（黑框標示），選機台按「製作」正常扣幣建立批次。
+- **Phase 4（收尾）**：導覽列加了「設計坊」連結（Peggy 反應「沒看到設計坊」時就先補上了）；首頁「現在已經可以做的事」補上收納冊/設計坊/工廠/超市，「接下來正在開發」文案改成設計坊功能加強中；`PixelCanvas.tsx` 補上觸控拖曳上色（`touchstart`/`touchmove` + `document.elementFromPoint` 讀 `data-idx`，沿用 project-brief демo驗證過的做法），觸控版沒有實機測試（瀏覽器自動化工具只能模擬滑鼠事件），程式邏輯跟滑鼠版共用同一個 `paintCell` 函式。
+- **測試資料**：帳號裡留了幾筆測試設計（「測試方塊」被覆蓋成「派大星」內容、另一張「派大星」、一筆「未命名設計」）跟對應的海報/娃娃庫存，是真實測試產生的資料，比照之前 MachineScene 測試的慣例不特別清除。
+- `tsc`／`lint`／`build`／`npm run test` 全過，尚未 commit。**刻意沒做的（列在計畫文件的 v1.1，之後再說）**：浮水印功能的畫面（`is_watermark` 欄位已經建好，之後加 UI 不用改資料庫）、外框範本（等工廠系統本身也要做這個時一起做）。
+
 ### 已知缺口 / 下一步待辦（依優先順序）
 
 1. ~~修正 `products.csv` 中 2 筆錯位資料並重新匯入~~ **已於 2026-07-31 完成**：修正第41、66列的欄位錯位（manufacturer/official_price 補回 BANDAI/¥500、USJ/¥3200，release_date/tags/image_url/source_url 對應歸位）；查證資料庫發現這兩筆（product_code 40、65）其實已存在且資料正確（id 401、402），推測先前已用某種方式補上，此次修正 CSV 只是讓原始檔案跟資料庫內容一致，重跑 `npm run import:products` 確認全部 402 筆皆判定為既有資料，無需新增。

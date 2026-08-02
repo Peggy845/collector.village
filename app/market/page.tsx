@@ -34,7 +34,7 @@ export default async function MarketPage() {
 
   const [balance, designs, inventory, shelves, slots, marketState, autoRestock] = await Promise.all([
     fetchCurrencyBalance(supabase, user.id),
-    fetchFactoryDesigns(supabase),
+    fetchFactoryDesigns(supabase, user.id),
     fetchInventory(supabase, user.id),
     fetchShelves(supabase, user.id),
     fetchShelfSlots(supabase, user.id),

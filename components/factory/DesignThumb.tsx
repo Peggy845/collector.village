@@ -13,10 +13,11 @@ export default function DesignThumb({
   onClick?: () => void;
 }) {
   if (design.storage_path) {
+    const bucket = design.user_id ? 'player-designs' : 'factory-designs';
     return (
       // eslint-disable-next-line @next/next/no-img-element
       <img
-        src={getFactoryDesignUrl(design.storage_path)}
+        src={getFactoryDesignUrl(design.storage_path, bucket)}
         alt={design.name ?? '設計圖'}
         onClick={onClick}
         className={className}

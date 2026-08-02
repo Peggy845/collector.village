@@ -35,14 +35,15 @@ export default async function Home() {
             <li>註冊帳號</li>
             <li>標記「已擁有／想要／虛擬收藏」</li>
             <li>上傳自己的實體照片</li>
-            <li>查看個人收藏紀錄</li>
+            <li>用「我的收納冊」整理、展示、分享收藏</li>
+            <li>在「設計坊」自己畫設計圖，拿去「工廠」生產、「超市」上架賣</li>
           </ul>
         </div>
         <div>
           <h2 className="mb-3 text-lg font-medium">接下來正在開發</h2>
           <p className="text-sm text-neutral-600">
-            <span className="font-medium text-neutral-800">「我的收納冊」</span>
-            ——把你的收藏用小卡收納冊的方式整理、展示，還可以選擇要不要生成連結分享給朋友看。
+            <span className="font-medium text-neutral-800">「設計坊」功能加強中</span>
+            ——目前已經可以畫圖、存進個人設計庫、拿去工廠生產，接下來會陸續補上更多細節（例如自訂造型外框）。
           </p>
         </div>
       </section>

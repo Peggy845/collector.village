@@ -14,6 +14,7 @@ export type FormatKey =
   | 'acrylic_stand'
   | 'acrylic_charm';
 export type ProductionBatchStatus = 'in_progress' | 'collected';
+export type PlayerDesignStatus = 'library' | 'temp';
 
 export interface Ip {
   id: number;
@@ -57,6 +58,7 @@ export interface UserProfile {
   market_open: boolean;
   market_closed_at: string | null;
   market_auto_restock: boolean;
+  design_library_capacity: number;
   created_at: string;
 }
 
@@ -141,7 +143,21 @@ export interface FactoryDesign {
   storage_path: string | null;
   name: string | null;
   is_active: boolean;
+  user_id: string | null;
+  player_design_id: number | null;
   created_at: string;
+}
+
+export interface PlayerDesign {
+  id: number;
+  user_id: string;
+  name: string;
+  pixel_data: number[];
+  is_watermark: boolean;
+  status: PlayerDesignStatus;
+  current_factory_design_id: number | null;
+  created_at: string;
+  updated_at: string;
 }
 
 export interface FactoryProductionBatch {
