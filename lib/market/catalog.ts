@@ -45,3 +45,16 @@ export function minutesUntilSoldOut(slot: MarketShelfSlot, now: number): number 
   const remaining = computeSlotRemaining(slot, now);
   return remaining * MARKET_SELL_MINUTES_PER_UNIT;
 }
+
+// 提早下架時，這個 slot 原本「排定的完整結束時間」跟「現在或它原本開始時間（取較晚者）」之間
+// 省下多少毫秒——這段差額要整批補回同貨架後面排隊的格子，讓它們提前開始賣
+// （見 app/api/market/delist/route.ts，2026-08-01 修正「下架後排隊沒遞補」的 bug）。
+// 抽成獨立函式方便寫單元測試，邏輯本身不依賴資料庫。
+export function computeTimeSavedOnEarlyDelist(
+  slot: Pick<MarketShelfSlot, 'active_from' | 'quantity'>,
+  now: number
+): number {
+  const activeFromMs = new Date(slot.active_from).getTime();
+  const scheduledFinishMs = activeFromMs + slot.quantity * MARKET_SELL_MINUTES_PER_UNIT * 60 * 1000;
+  return Math.max(0, scheduledFinishMs - Math.max(now, activeFromMs));
+}

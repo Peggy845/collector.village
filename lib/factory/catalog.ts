@@ -97,6 +97,19 @@ for (const machine of FACTORY_MACHINES) {
   }
 }
 
+// 新排一批生產要接在佇列最後一批之後才開始算時間；如果佇列最後一批其實已經到時間了（玩家還沒
+// 收成，但排程上早就跑完了），新的一批改成從現在開始算，不會平白繼承一段早就過去的等待時間
+// （見 app/api/factory/start/route.ts）。抽成獨立函式方便寫單元測試，邏輯本身不依賴資料庫。
+export function computeQueuedBatchReadyAt(
+  latestQueuedReadyAtIso: string | null,
+  now: number,
+  productionMinutes: number
+): string {
+  const lastReadyAt = latestQueuedReadyAtIso ? new Date(latestQueuedReadyAtIso).getTime() : now;
+  const startFrom = Math.max(now, lastReadyAt);
+  return new Date(startFrom + productionMinutes * 60 * 1000).toISOString();
+}
+
 export function findMachine(machineKey: string): FactoryMachine | undefined {
   return FACTORY_MACHINES.find((m) => m.key === machineKey);
 }

@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { findFormatByKey } from '@/lib/factory/catalog';
-import { computeSlotRemaining, computeSlotSoldSoFar } from '@/lib/market/catalog';
+import { computeSlotRemaining, computeSlotSoldSoFar, computeTimeSavedOnEarlyDelist } from '@/lib/market/catalog';
 import type { MarketShelfSlot } from '@/types/database';
 
 // 下架：把貨架上還沒賣完的數量收回工廠倉庫。下架前先把「已經賣掉但還沒按收款」的部分結算入帳，
@@ -92,9 +92,7 @@ export async function POST(request: Request) {
   // 提前開始（2026-08-01 修正：Peggy 實測抓到「下架後，排在後面的東西沒有跟著往前遞補」的 bug）。
   // 算法：這個格子原本「排定的完整結束時間」減去「現在或它原本開始時間，取比較晚的那個」，
   // 差額就是省下來的時間；同貨架上排定時間點在它之後的格子，通通往前移動這段差額。
-  const activeFromMs = new Date(typedSlot.active_from).getTime();
-  const scheduledFinishMs = activeFromMs + typedSlot.quantity * 60 * 1000;
-  const timeSavedMs = Math.max(0, scheduledFinishMs - Math.max(now, activeFromMs));
+  const timeSavedMs = computeTimeSavedOnEarlyDelist(typedSlot, now);
 
   if (timeSavedMs > 0) {
     const { data: laterSlots } = await admin

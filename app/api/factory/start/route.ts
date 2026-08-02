@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { fetchCurrencyBalance } from '@/lib/supabase/currency';
-import { findMachine, findFormat, MAX_QUEUE_PER_MACHINE } from '@/lib/factory/catalog';
+import { findMachine, findFormat, MAX_QUEUE_PER_MACHINE, computeQueuedBatchReadyAt } from '@/lib/factory/catalog';
 
 // 開始生產：把一批新工作排進機台的生產佇列（見 PROJECT_PROGRESS.md 已定案項目31補充：
 // 同一台機器可以同時排最多 MAX_QUEUE_PER_MACHINE 批，依序生產，玩家不用每 10~30 分鐘就開一次遊戲）。
@@ -63,11 +63,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: `遊戲幣不足，需要 ${cost} 枚，目前只有 ${balance} 枚` }, { status: 400 });
   }
 
-  // 新工作接在佇列最後一批之後才開始算生產時間；若佇列裡最後一批其實已經到時間了（玩家還沒收成，
-  // 但排程上早就跑完了），新工作改成從現在開始算，不會平白繼承一段早就過去的等待時間。
-  const lastReadyAt = existingQueue[0] ? new Date(existingQueue[0].ready_at).getTime() : Date.now();
-  const startFrom = Math.max(Date.now(), lastReadyAt);
-  const readyAt = new Date(startFrom + format.productionMinutes * 60 * 1000).toISOString();
+  const readyAt = computeQueuedBatchReadyAt(existingQueue[0]?.ready_at ?? null, Date.now(), format.productionMinutes);
 
   const { error: batchError } = await admin.from('factory_production_batches').insert({
     user_id: user.id,
