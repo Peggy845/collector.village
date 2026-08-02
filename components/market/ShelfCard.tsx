@@ -6,6 +6,7 @@ import { findFormatByKey } from '@/lib/factory/catalog';
 import { computeSlotRemaining, isSlotActive, minutesUntilSoldOut } from '@/lib/market/catalog';
 import type { FactoryDesign, FactoryInventoryItem, MarketShelf, MarketShelfSlot } from '@/types/database';
 import DesignThumb from '@/components/factory/DesignThumb';
+import ShelfScene from '@/components/market/ShelfScene';
 
 function SlotView({
   slot,
@@ -192,6 +193,12 @@ export default function ShelfCard({
   const [loading, setLoading] = useState(false);
   const [autoFilling, setAutoFilling] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [justListed, setJustListed] = useState(false);
+
+  function flashJustListed() {
+    setJustListed(true);
+    setTimeout(() => setJustListed(false), 1500);
+  }
 
   useEffect(() => {
     const interval = setInterval(() => setNow(Date.now()), 1000);
@@ -207,6 +214,8 @@ export default function ShelfCard({
     [slots, effectiveNow]
   );
   const freeSpace = Math.max(0, shelf.capacity - usedCapacity);
+  const hasStock = usedCapacity > 0;
+  const isFull = freeSpace <= 0;
 
   async function handleDelist(slotId: number) {
     setError(null);
@@ -254,6 +263,7 @@ export default function ShelfCard({
         if (!res.ok) throw new Error(body.error ?? '自動上架失敗');
         remaining -= quantity;
       }
+      flashJustListed();
       router.refresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : '自動上架失敗');
@@ -291,6 +301,8 @@ export default function ShelfCard({
         </div>
       </div>
 
+      <ShelfScene hasStock={hasStock} isFull={isFull} justListed={justListed} />
+
       {error && <p className="text-xs text-red-600">{error}</p>}
 
       <div className="flex flex-col gap-2">
@@ -315,7 +327,10 @@ export default function ShelfCard({
         freeSpace={freeSpace}
         inventory={inventory}
         designs={designs}
-        onListed={() => router.refresh()}
+        onListed={() => {
+          flashJustListed();
+          router.refresh();
+        }}
       />
 
       <p className="text-xs text-neutral-400">

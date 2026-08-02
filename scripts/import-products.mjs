@@ -9,82 +9,27 @@
 // category_group 是否為清單外新分類、official_price 格式），這些只列為警告、不擋匯入，
 // 因為 category_group 本身允許持續擴充（見已定案項目8），且此份 CSV 已人工複查過。
 //
+// 已知缺口第5項（2026-08-02 補上）：Peggy 逐行校對 CSV 時，把確認沒問題的那一列剪下貼到
+// CSV 最下面「已審核」分隔列之後（見 scripts/lib/csv-import.mjs 的 REVIEWED_SECTION_MARKER）。
+// 這個分隔列之後的資料改成「依 product_code 比對」：DB 裡已經有這個編號就覆蓋更新既有那一列
+// （校對時修正的錯字/欄位才會真的反映到資料庫），DB 裡沒有這個編號（校對時新增的商品）才用
+// 插入。分隔列之前的資料維持原本的「新增才會被跳過視為重複」邏輯不變，兩邊互不影響。
+// 沒有「已審核」分隔列時，行為完全等同於這次修改之前的版本（全部走新增流程），向下相容。
+//
 // 用 service role 金鑰直接寫入，繞過 RLS（見已定案項目18：不做後台管理介面，改用本機腳本）。
 
 import { createClient } from '@supabase/supabase-js';
 import { readFileSync } from 'node:fs';
-
-const KNOWN_CATEGORY_GROUPS = new Set([
-  '立體公仔類', '配戴隨身類', '包袋類', '服裝類',
-  '生活雜貨類', '紙製/影像類', '影音類', '出版品類', '布娃娃類',
-]);
-
-const CSV_COLUMNS = [
-  '商品編號', 'ip_name', 'series_name', 'series_year', 'product_name', 'category_group',
-  'category', 'kuji_prize_tier', 'characters', 'character_aliases',
-  'manufacturer', 'official_price', 'release_date', 'tags', 'image_url', 'source_url',
-];
-
-function parseCsv(text) {
-  const rows = [];
-  let field = '';
-  let row = [];
-  let inQuotes = false;
-
-  for (let i = 0; i < text.length; i++) {
-    const c = text[i];
-
-    if (inQuotes) {
-      if (c === '"') {
-        if (text[i + 1] === '"') {
-          field += '"';
-          i++;
-        } else {
-          inQuotes = false;
-        }
-      } else {
-        field += c;
-      }
-      continue;
-    }
-
-    if (c === '"') {
-      inQuotes = true;
-    } else if (c === ',') {
-      row.push(field);
-      field = '';
-    } else if (c === '\n' || c === '\r') {
-      if (c === '\r' && text[i + 1] === '\n') i++;
-      row.push(field);
-      field = '';
-      if (row.length > 1 || row[0] !== '') rows.push(row);
-      row = [];
-    } else {
-      field += c;
-    }
-  }
-  if (field !== '' || row.length > 0) {
-    row.push(field);
-    rows.push(row);
-  }
-
-  return rows;
-}
-
-function toList(value) {
-  if (!value) return null;
-  const items = value.split(';').map((v) => v.trim()).filter(Boolean);
-  return items.length > 0 ? items : null;
-}
-
-function containsJapaneseKana(value) {
-  return /[぀-ゟ゠-ヿ]/.test(value || '');
-}
-
-function isValidPriceFormat(value) {
-  if (!value) return true; // 空值不算格式錯誤，只是沒填
-  return /^¥\d[\d,]*$/.test(value) || /^NT\$\d[\d,]*$/.test(value) || value === '非賣品';
-}
+import {
+  CSV_COLUMNS,
+  buildColIndex,
+  buildDupKey,
+  extractRowFields,
+  fieldsToProductRecord,
+  parseCsv,
+  splitReviewedSection,
+  validateRowFields,
+} from './lib/csv-import.mjs';
 
 async function main() {
   const csvPath = process.argv[2] || 'products.csv';
@@ -110,9 +55,14 @@ async function main() {
     console.error(`CSV 缺少必要欄位：${missingCols.join(', ')}`);
     process.exit(1);
   }
-  const colIndex = Object.fromEntries(header.map((h, i) => [h, i]));
+  const colIndex = buildColIndex(header);
 
-  console.log(`讀到 ${dataRows.length} 筆資料，開始處理...\n`);
+  const { mainRows, reviewedRows, markerIndex } = splitReviewedSection(dataRows);
+  console.log(
+    markerIndex === -1
+      ? `讀到 ${dataRows.length} 筆資料，沒有「已審核」分隔列，全部走新增流程...\n`
+      : `讀到 ${mainRows.length} 筆一般資料 + ${reviewedRows.length} 筆已審核資料，開始處理...\n`
+  );
 
   // ---- 準備 ips / series 快取 ----
   const { data: existingIps, error: ipsErr } = await supabase.from('ips').select('id, name');
@@ -123,18 +73,26 @@ async function main() {
   if (seriesErr) throw seriesErr;
   const seriesCache = new Map(existingSeries.map((r) => [`${r.ip_id}::${r.name}`, r.id]));
 
-  // ---- 既有商品的重複偵測 key 集合（系列名稱 + 商品名稱 + 賞別） ----
+  // ---- 既有商品的重複偵測 key 集合（系列名稱 + 商品名稱 + 賞別），只給主區塊的新增流程用 ----
   const { data: existingProducts, error: productsErr } = await supabase
     .from('products')
     .select('name, kuji_prize_tier, series:series_id(name)');
   if (productsErr) throw productsErr;
-  const dupKeys = new Set(
-    existingProducts.map((p) => `${p.series?.name ?? ''}|${p.name}|${p.kuji_prize_tier ?? ''}`)
-  );
+  const dupKeys = new Set(existingProducts.map((p) => buildDupKey(p.series?.name, p.name, p.kuji_prize_tier)));
+
+  // ---- 已審核區塊要用的 product_code -> id 對照表 ----
+  const { data: existingByCode, error: codeErr } = await supabase
+    .from('products')
+    .select('id, product_code')
+    .not('product_code', 'is', null);
+  if (codeErr) throw codeErr;
+  const productIdByCode = new Map(existingByCode.map((r) => [r.product_code, r.id]));
 
   const skipped = [];
   const warnings = [];
   const toInsert = [];
+  const toUpdate = [];
+  const toInsertFromReviewed = [];
 
   async function resolveIpId(ipName) {
     if (ipCache.has(ipName)) return ipCache.get(ipName);
@@ -158,86 +116,68 @@ async function main() {
     return data.id;
   }
 
-  for (let i = 0; i < dataRows.length; i++) {
-    const cols = dataRows[i];
+  // ---- 主區塊：一般新增流程（跟這次修改之前完全相同的行為）----
+  for (let i = 0; i < mainRows.length; i++) {
+    const cols = mainRows[i];
     const rowNum = i + 2; // +1 header, +1 1-indexed
-    const get = (name) => (cols[colIndex[name]] ?? '').trim();
+    const fields = extractRowFields(cols, colIndex);
 
-    const productCode = get('商品編號');
-    const ipName = get('ip_name');
-    const seriesName = get('series_name');
-    const seriesYear = get('series_year');
-    const productName = get('product_name');
-    const categoryGroup = get('category_group');
-    const category = get('category');
-    const kujiPrizeTier = get('kuji_prize_tier') || null;
-    const characters = get('characters');
-    const characterAliases = get('character_aliases');
-    const manufacturer = get('manufacturer') || null;
-    const officialPrice = get('official_price') || null;
-    const releaseDate = get('release_date') || null;
-    const tags = get('tags');
-    const imageUrl = get('image_url') || null;
-    const sourceUrl = get('source_url') || null;
-
-    if (!productName || !category || !categoryGroup || !ipName) {
-      skipped.push({ row: rowNum, name: productName || '(無名稱)', reason: '缺少必填欄位（商品名稱/分類/大分類/作品）' });
+    const { skipReason, warnings: rowWarnings } = validateRowFields(fields);
+    if (skipReason) {
+      skipped.push({ row: rowNum, name: fields.productName || '(無名稱)', reason: skipReason });
       continue;
     }
 
-    if (releaseDate && !/^\d{4}-\d{2}-\d{2}$/.test(releaseDate)) {
+    const dupKey = buildDupKey(fields.seriesName, fields.productName, fields.kujiPrizeTier);
+    if (dupKeys.has(dupKey)) {
+      skipped.push({ row: rowNum, name: fields.productName, reason: '重複商品（系列+名稱+賞別已存在）' });
+      continue;
+    }
+
+    for (const issue of rowWarnings) warnings.push({ row: rowNum, name: fields.productName, issue });
+    dupKeys.add(dupKey); // 同一批次內也要防重複
+
+    const ipId = await resolveIpId(fields.ipName);
+    const seriesId = await resolveSeriesId(ipId, fields.seriesName, fields.seriesYear);
+    toInsert.push(fieldsToProductRecord(fields, ipId, seriesId));
+  }
+
+  // ---- 已審核區塊：依 product_code 比對，DB 有這個編號就更新、沒有就新增 ----
+  for (let i = 0; i < reviewedRows.length; i++) {
+    const cols = reviewedRows[i];
+    const rowNum = markerIndex + i + 3; // marker本身也佔一列，+1 header, +1 1-indexed
+    const fields = extractRowFields(cols, colIndex);
+
+    if (!fields.productCode) {
       skipped.push({
         row: rowNum,
-        name: productName,
-        reason: `release_date 格式異常（值為「${releaseDate}」，疑似該列欄位錯位，請人工檢查原始CSV該列）`,
+        name: fields.productName || '(無名稱)',
+        reason: '已審核區塊的資料缺少商品編號，無法比對要更新哪一筆，已跳過',
       });
       continue;
     }
 
-    const dupKey = `${seriesName}|${productName}|${kujiPrizeTier ?? ''}`;
-    if (dupKeys.has(dupKey)) {
-      skipped.push({ row: rowNum, name: productName, reason: `重複商品（系列+名稱+賞別已存在）` });
+    const { skipReason, warnings: rowWarnings } = validateRowFields(fields);
+    if (skipReason) {
+      skipped.push({ row: rowNum, name: fields.productName || '(無名稱)', reason: skipReason });
       continue;
     }
+    for (const issue of rowWarnings) warnings.push({ row: rowNum, name: fields.productName, issue });
 
-    if (characters && characters.split(';').some((c) => c.trim() === '綜合')) {
-      warnings.push({ row: rowNum, name: productName, issue: 'characters 欄位出現「綜合」，違反第5項規則（角色戲份再少也應個別列出）' });
-    }
-    if (categoryGroup && !KNOWN_CATEGORY_GROUPS.has(categoryGroup)) {
-      warnings.push({ row: rowNum, name: productName, issue: `category_group「${categoryGroup}」不在已知9大分類清單，若非刻意新增分類請確認拼字` });
-    }
-    if (containsJapaneseKana(seriesName)) {
-      warnings.push({ row: rowNum, name: productName, issue: `series_name「${seriesName}」疑似殘留日文假名未轉換` });
-    }
-    if (!isValidPriceFormat(officialPrice)) {
-      warnings.push({ row: rowNum, name: productName, issue: `official_price「${officialPrice}」格式不符 ¥/NT$/非賣品 規則` });
-    }
+    const ipId = await resolveIpId(fields.ipName);
+    const seriesId = await resolveSeriesId(ipId, fields.seriesName, fields.seriesYear);
+    const record = fieldsToProductRecord(fields, ipId, seriesId);
+    const code = Number(fields.productCode);
+    const existingId = productIdByCode.get(code);
 
-    dupKeys.add(dupKey); // 同一批次內也要防重複
-
-    const ipId = await resolveIpId(ipName);
-    const seriesId = await resolveSeriesId(ipId, seriesName, seriesYear);
-
-    toInsert.push({
-      product_code: productCode ? Number(productCode) : null,
-      ip_id: ipId,
-      series_id: seriesId,
-      name: productName,
-      characters: toList(characters),
-      character_aliases: toList(characterAliases),
-      category,
-      category_group: categoryGroup,
-      kuji_prize_tier: kujiPrizeTier,
-      manufacturer,
-      official_price: officialPrice,
-      image_url: imageUrl,
-      source_url: sourceUrl,
-      release_date: releaseDate,
-      tags: toList(tags),
-    });
+    if (existingId) {
+      toUpdate.push({ id: existingId, record });
+    } else {
+      toInsertFromReviewed.push(record);
+    }
   }
 
-  // ---- 批次寫入 products ----
+  // ---- 批次寫入 ----
   const CHUNK_SIZE = 200;
   let inserted = 0;
   for (let i = 0; i < toInsert.length; i += CHUNK_SIZE) {
@@ -247,9 +187,28 @@ async function main() {
     inserted += chunk.length;
   }
 
+  let insertedFromReviewed = 0;
+  for (let i = 0; i < toInsertFromReviewed.length; i += CHUNK_SIZE) {
+    const chunk = toInsertFromReviewed.slice(i, i + CHUNK_SIZE);
+    const { error } = await supabase.from('products').insert(chunk);
+    if (error) throw error;
+    insertedFromReviewed += chunk.length;
+  }
+
+  let updated = 0;
+  for (const { id, record } of toUpdate) {
+    const { error } = await supabase.from('products').update(record).eq('id', id);
+    if (error) throw error;
+    updated++;
+  }
+
   // ---- 報告 ----
   console.log('========== 匯入結果報告 ==========');
-  console.log(`成功匯入：${inserted} 筆`);
+  console.log(`成功匯入（一般新增）：${inserted} 筆`);
+  if (markerIndex !== -1) {
+    console.log(`已審核區塊 - 覆蓋更新既有資料：${updated} 筆`);
+    console.log(`已審核區塊 - 新增（product_code 沒對到既有資料）：${insertedFromReviewed} 筆`);
+  }
   console.log(`跳過：${skipped.length} 筆`);
   if (skipped.length > 0) {
     for (const s of skipped) console.log(`  - 第${s.row}列「${s.name}」：${s.reason}`);
