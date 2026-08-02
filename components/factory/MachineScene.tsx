@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import Image from 'next/image';
 import type { MachineKey } from '@/types/database';
 
 // 工廠美化動畫（2026-08-02 依 idea/印表機簡單版.png 改版，取代原本的五段式敘事骨架）。
@@ -11,13 +12,13 @@ import type { MachineKey } from '@/types/database';
 //     B（出貨口位置，右下角）：佇列裡有沒有「已完成、還沒按收成」的批次＝一堆貨，沒有＝空白
 //       （2026-08-02 改成看佇列而非工廠倉庫庫存，見 idea/圖示不對.png：原本看倉庫庫存時，
 //       玩家會看到序列明明是空的卻出現貨堆，因為倉庫裡還留著很久以前收成、還沒拿去超市上架的舊庫存）。
-// 建築本體目前用 emoji 佔位（BUILDING_EMOJI），之後 Peggy 從 Gemini 拿到真的圖，
-// 只需要把它換成 <img src="真的圖檔">，呼叫端（MachineCard）完全不用改，因為狀態判斷邏輯不在這個檔案裡。
-const BUILDING_EMOJI: Record<MachineKey, string> = {
-  printer: '🖨️',
-  sewing: '🧵',
-  press: '⚙️',
-  laser: '💠',
+// 建築圖跟三個疊加圖示是 Peggy 依 idea/gemini-工廠美術prompt.md 用 Gemini 生成、存在
+// public/factory/ 底下的透明背景PNG（2026-08-02 換上，取代原本的 emoji 佔位）。
+const BUILDING_IMAGE: Record<MachineKey, string> = {
+  printer: '/factory/printer.png',
+  sewing: '/factory/sewing.png',
+  press: '/factory/press.png',
+  laser: '/factory/laser.png',
 };
 
 const BUILDING_ACCENT: Record<MachineKey, string> = {
@@ -45,22 +46,36 @@ export default function MachineScene({
     <div
       className={`relative flex h-28 items-center justify-center overflow-visible rounded-lg border ${BUILDING_ACCENT[machineKey]}`}
     >
-      {/* 建築本體佔位，之後直接換成 <img src="Gemini生成的建築圖" /> */}
-      <span className="text-5xl opacity-70">{BUILDING_EMOJI[machineKey]}</span>
+      {/* 建築本體 */}
+      <div className="relative h-24 w-44">
+        <Image src={BUILDING_IMAGE[machineKey]} alt="" fill className="object-contain" sizes="176px" />
+      </div>
 
       {/* A：煙囪位置 */}
       <span
-        className="absolute right-3 top-1 text-xl"
+        className="absolute right-2 top-1 block h-7 w-7"
         aria-label={producing ? '生產中' : '待機中'}
         title={producing ? '生產中' : '待機中'}
       >
-        {producing ? <span className="animate-pulse">💨</span> : <span className="opacity-50">💤</span>}
+        <span className={`relative block h-full w-full ${producing ? 'animate-pulse' : 'opacity-70'}`}>
+          <Image
+            src={producing ? '/factory/icon-smoke.png' : '/factory/icon-sleep.png'}
+            alt=""
+            fill
+            className="object-contain"
+            sizes="28px"
+          />
+        </span>
       </span>
 
       {/* B：出貨口位置，有已完成待收成的批次才顯示 */}
       {hasReadyBatch && (
-        <span className="absolute bottom-1 right-3 text-xl" aria-label="有完成的批次等待收成" title="有完成的批次等待收成">
-          📦
+        <span
+          className="absolute bottom-1 right-2 block h-7 w-7"
+          aria-label="有完成的批次等待收成"
+          title="有完成的批次等待收成"
+        >
+          <Image src="/factory/icon-boxes.png" alt="" fill className="object-contain" sizes="28px" />
         </span>
       )}
 

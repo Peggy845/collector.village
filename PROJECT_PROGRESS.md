@@ -640,6 +640,13 @@ Vercel 專案 `qa-clinic-taiwan/collector-village` 是沿用舊靜態佔位頁�
 - **刻意沒做的部分**：API 路由層本身（登入驗證、request 格式檢查）、收款併發鎖、超市暫停/重新營業的時間平移都還沒有測試覆蓋——這些牽涉到 Next.js 的 `cookies()`/`createClient()`，要 mock 的東西更多、報酬率較低，先不做；之後如果剛好要動到這些邏輯，可以順手用同一套 `fakeSupabase.ts` 補測試。
 - `tsc`／`lint`／`build`／`npm run test` 全過。純程式碼層級的重構跟新增測試，沒有改變任何既有行為，不需要真人瀏覽器測試。
 
+### 工廠建築圖換裝（2026-08-02 新增，取代 emoji 佔位）
+
+- **背景**：`idea/gemini-工廠美術prompt.md`（第32次討論定案的分工方式）早先就寫好了 7 張圖的 prompt，但 Peggy 一直沒有實際拿去給 Gemini 生圖。這次順著「今天要幹嘛」的討論才發現這件事還沒做，Claude 說明怎麼把「共同風格描述」跟每張圖的專屬描述組合貼給 Gemini，Peggy 當場生完 7 張、存進新增的 `public/factory/` 資料夾（`printer.png`／`sewing.png`／`press.png`／`laser.png` 四棟建築 ＋ `icon-smoke.png`／`icon-sleep.png`／`icon-boxes.png` 三個疊加圖示）。
+- **`MachineScene.tsx` 從 emoji 佔位換成 `next/image` 疊圖**：建築本體用 `fill` + `object-contain` 顯示在固定尺寸的容器裡；煙囪位置疊加冒煙／Zzz 圖示（依 `producing` 切換）、出貨口位置疊加出貨堆圖示（依 `hasReadyBatch` 顯示與否），排隊/倒數/收成等互動邏輯完全沒動。
+- **踩到一個坑，之後疊加 Gemini 生成的小圖示都要注意**：3 個疊加小圖示換上後在畫面上幾乎看不見，用 `sharp` 檢查發現 Gemini 生圖時圖案本身只佔畫布中間一小塊（例如 `icon-sleep.png` 畫布 677×369，Zzz 文字圖案本身只佔中間 248×241，四周留了大量透明留白），疊加到 28×28 的小圖示框內被壓縮到幾乎看不見。修法：寫一段 `sharp` 腳本掃描每張圖 alpha>10 的像素找出實際內容的 bounding box，重新裁切三張圖示（各留一點 padding）後才清楚可見。**教訓：不能預設 Gemini 生圖的內容會自動貼齊畫布邊緣，尤其是這種「小圖示」類型的 prompt，之後要疊加使用前最好都先檢查一下實際內容佔畫布的比例，需要的話先裁切。**
+- **已驗證**：用 Chrome 開發者工具登入既有測試帳號實際跑過 `/factory`——四棟建築都正常顯示、配色跟卡片底色（藍/粉/黃/紫）搭配良好；按「製作」後煙囪圖示從 Zzz 切成冒煙；等生產完成（開發環境設定1分鐘）後出貨口出現出貨堆圖示；收成後恢復正常，全程沒有互動邏輯異常。`tsc`／`lint`／`build`／`npm run test` 皆過。
+
 ### 已知缺口 / 下一步待辦（依優先順序）
 
 1. ~~修正 `products.csv` 中 2 筆錯位資料並重新匯入~~ **已於 2026-07-31 完成**：修正第41、66列的欄位錯位（manufacturer/official_price 補回 BANDAI/¥500、USJ/¥3200，release_date/tags/image_url/source_url 對應歸位）；查證資料庫發現這兩筆（product_code 40、65）其實已存在且資料正確（id 401、402），推測先前已用某種方式補上，此次修正 CSV 只是讓原始檔案跟資料庫內容一致，重跑 `npm run import:products` 確認全部 402 筆皆判定為既有資料，無需新增。
