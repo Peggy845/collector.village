@@ -87,6 +87,7 @@ function ListingPanel({
   const [overrides, setOverrides] = useState<Record<string, number>>({});
   const [loadingKey, setLoadingKey] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [filter, setFilter] = useState('');
 
   const designById = new Map(designs.map((d) => [d.id, d]));
 
@@ -129,11 +130,30 @@ function ListingPanel({
     return <p className="text-xs text-neutral-400">工廠倉庫目前沒有東西可以上架。</p>;
   }
 
+  const keyword = filter.trim().toLowerCase();
+  const visibleInventory = keyword
+    ? inventory.filter((item) => {
+        const format = findFormatByKey(item.format_key);
+        const design = designById.get(item.design_id);
+        return `${format?.name ?? ''}${design?.name ?? ''}`.toLowerCase().includes(keyword);
+      })
+    : inventory;
+
   return (
     <div className="flex flex-col gap-2 rounded border border-dashed border-neutral-300 p-3 text-sm">
       <p className="text-xs text-neutral-500">待上架（預設數量已經幫你填好，可以直接按上架，或自己改數字）</p>
+      {inventory.length > 8 && (
+        <input
+          type="text"
+          value={filter}
+          onChange={(e) => setFilter(e.target.value)}
+          placeholder="搜尋格式或設計圖名稱…"
+          className="rounded border border-neutral-300 px-2 py-1 text-xs"
+        />
+      )}
+      {visibleInventory.length === 0 && <p className="text-xs text-neutral-400">找不到符合「{filter}」的品項。</p>}
       <ul className="flex flex-col gap-1.5">
-        {inventory.map((item) => {
+        {visibleInventory.map((item) => {
           const key = `${item.format_key}:${item.design_id}`;
           const format = findFormatByKey(item.format_key);
           const design = designById.get(item.design_id);

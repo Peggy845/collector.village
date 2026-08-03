@@ -74,6 +74,7 @@ export default function MachineCard({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [now, setNow] = useState(() => Date.now());
+  const [designFilter, setDesignFilter] = useState('');
   // 收成成功的短暫「✅」提示，跟 hasReadyBatch 是否為 true 無關，純粹是給玩家的即時反饋，
   // 用 timeout 自己收尾，不用綁定被收成的那筆批次是否還存在於 batches。
   const [justCollected, setJustCollected] = useState(false);
@@ -214,18 +215,63 @@ export default function MachineCard({
             ))}
           </div>
 
-          <div className="grid grid-cols-4 gap-2 sm:grid-cols-5">
-            {designs.map((design) => (
-              <DesignThumb
-                key={design.id}
-                design={design}
-                onClick={() => setDesignId(design.id)}
-                className={`aspect-square w-full cursor-pointer rounded border object-cover ${
-                  design.id === designId ? 'border-neutral-900 ring-2 ring-neutral-900' : 'border-neutral-200'
-                }`}
-              />
-            ))}
-          </div>
+          {designs.length > 8 && (
+            <input
+              type="text"
+              value={designFilter}
+              onChange={(e) => setDesignFilter(e.target.value)}
+              placeholder="搜尋設計圖名稱…"
+              className="rounded border border-neutral-300 px-2 py-1 text-xs"
+            />
+          )}
+
+          {(() => {
+            const keyword = designFilter.trim().toLowerCase();
+            const filtered = keyword
+              ? designs.filter((d) => (d.name ?? '').toLowerCase().includes(keyword))
+              : designs;
+            const officialDesigns = filtered.filter((d) => d.user_id == null);
+            const ownDesigns = filtered.filter((d) => d.user_id != null);
+
+            function designGrid(list: FactoryDesign[]) {
+              return (
+                <div className="grid grid-cols-4 gap-2 sm:grid-cols-5">
+                  {list.map((design) => (
+                    <DesignThumb
+                      key={design.id}
+                      design={design}
+                      onClick={() => setDesignId(design.id)}
+                      className={`aspect-square w-full cursor-pointer rounded border object-cover ${
+                        design.id === designId ? 'border-neutral-900 ring-2 ring-neutral-900' : 'border-neutral-200'
+                      }`}
+                    />
+                  ))}
+                </div>
+              );
+            }
+
+            if (filtered.length === 0) {
+              return <p className="text-xs text-neutral-400">找不到符合「{designFilter}」的設計圖。</p>;
+            }
+
+            // 官方圖庫/我的設計分開一組（見 2026-08-03 討論：設計坊上線後設計會變多，混在一起
+            // 平鋪很難找），只有兩邊都有東西時才需要各自標題，否則直接顯示單一組不加多餘標題。
+            if (officialDesigns.length > 0 && ownDesigns.length > 0) {
+              return (
+                <div className="flex flex-col gap-3">
+                  <div>
+                    <p className="mb-1 text-xs text-neutral-500">官方圖庫</p>
+                    {designGrid(officialDesigns)}
+                  </div>
+                  <div>
+                    <p className="mb-1 text-xs text-neutral-500">我的設計</p>
+                    {designGrid(ownDesigns)}
+                  </div>
+                </div>
+              );
+            }
+            return designGrid(filtered);
+          })()}
 
           <p className="text-xs text-neutral-500">
             製作「{selectedFormat.name} × {selectedFormat.outputQuantity}」，花費 {machine.materialCost} 幣，共{' '}
