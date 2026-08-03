@@ -27,6 +27,7 @@ export default function DesignLibraryModal({
 }) {
   const title = mode === 'view' ? '我的設計庫' : '選擇要覆蓋的設計';
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
+  const [filter, setFilter] = useState('');
 
   function toggleSelected(id: number) {
     setSelectedIds((prev) => {
@@ -38,6 +39,8 @@ export default function DesignLibraryModal({
   }
 
   const selectedDesign = designs.find((d) => selectedIds.has(d.id));
+  const keyword = filter.trim().toLowerCase();
+  const visibleDesigns = keyword ? designs.filter((d) => d.name.toLowerCase().includes(keyword)) : designs;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
@@ -54,6 +57,16 @@ export default function DesignLibraryModal({
 
         {mode === 'overwrite' && (
           <p className="mb-3 text-xs text-neutral-500">設計庫已滿，選一張要覆蓋的設計（原本的圖案會被換掉）。</p>
+        )}
+
+        {designs.length > 8 && (
+          <input
+            type="text"
+            value={filter}
+            onChange={(e) => setFilter(e.target.value)}
+            placeholder="搜尋設計名稱…"
+            className="mb-3 w-full rounded border border-neutral-300 px-2 py-1 text-xs"
+          />
         )}
 
         {mode === 'view' && designs.length > 0 && (
@@ -79,9 +92,11 @@ export default function DesignLibraryModal({
 
         {designs.length === 0 ? (
           <p className="text-sm text-neutral-400">設計庫目前是空的。</p>
+        ) : visibleDesigns.length === 0 ? (
+          <p className="text-sm text-neutral-400">找不到符合「{filter}」的設計。</p>
         ) : (
           <ul className="flex flex-col gap-2">
-            {designs.map((design) => (
+            {visibleDesigns.map((design) => (
               <li key={design.id} className="flex items-center gap-2">
                 {mode === 'view' && (
                   <input
