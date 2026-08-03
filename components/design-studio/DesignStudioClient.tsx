@@ -29,8 +29,9 @@ export default function DesignStudioClient({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [savedMessage, setSavedMessage] = useState<string | null>(null);
-  const [modalMode, setModalMode] = useState<'view' | 'import' | 'overwrite' | null>(null);
+  const [modalMode, setModalMode] = useState<'view' | 'overwrite' | null>(null);
   const [producing, setProducing] = useState(false);
+  const [deleting, setDeleting] = useState(false);
 
   async function performSave(overwriteId?: number) {
     setError(null);
@@ -94,6 +95,33 @@ export default function DesignStudioClient({
     performSave(design.id);
   }
 
+  async function handleDelete(ids: number[]) {
+    if (ids.length === 0) return;
+    setError(null);
+    setSavedMessage(null);
+    setDeleting(true);
+    try {
+      const res = await fetch('/api/design-studio/delete', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ids }),
+      });
+      const body = await res.json();
+      if (!res.ok) throw new Error(body.error ?? '刪除失敗');
+
+      if (body.blocked?.length > 0) {
+        setError(`${body.deleted.length} 張已刪除，${body.blocked.length} 張還在生產中／倉庫／貨架，賣完才能刪`);
+      } else {
+        setModalMode(null);
+      }
+      router.refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '刪除失敗');
+    } finally {
+      setDeleting(false);
+    }
+  }
+
   // 「直接生產」：不存進設計庫，直接帶著這張圖去工廠選機台/格式（見上方檔案註解跟
   // app/api/design-studio/produce/route.ts）。
   async function handleProduceDirect() {
@@ -131,13 +159,6 @@ export default function DesignStudioClient({
               className="rounded border border-neutral-300 px-3 py-1.5 text-sm hover:border-neutral-500"
             >
               查看設計庫
-            </button>
-            <button
-              type="button"
-              onClick={() => setModalMode('import')}
-              className="rounded border border-neutral-300 px-3 py-1.5 text-sm hover:border-neutral-500"
-            >
-              匯入設計
             </button>
           </div>
 
@@ -204,7 +225,10 @@ export default function DesignStudioClient({
         <DesignLibraryModal
           mode={modalMode}
           designs={library}
-          onSelect={modalMode === 'import' ? handleImportSelect : modalMode === 'overwrite' ? handleOverwriteSelect : undefined}
+          onSelect={modalMode === 'overwrite' ? handleOverwriteSelect : undefined}
+          onImport={modalMode === 'view' ? handleImportSelect : undefined}
+          onDelete={modalMode === 'view' ? handleDelete : undefined}
+          deleting={deleting}
           onClose={() => setModalMode(null)}
         />
       )}
