@@ -73,7 +73,7 @@ export default async function MarketPage() {
           <p className="text-sm text-neutral-500">目前擁有</p>
           <p className="mt-1 text-lg font-medium">{balance} 枚遊戲幣</p>
         </div>
-        <BuyShelfButton />
+        <BuyShelfButton shelfCount={shelves.length} />
       </section>
 
       <RevenuePanel slots={slots} marketOpen={marketState.open} marketClosedAt={marketState.closedAt} />

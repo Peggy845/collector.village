@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { fetchCurrencyBalance } from '@/lib/supabase/currency';
-import { DEFAULT_SHELF_CAPACITY, MARKET_SHELF_COST } from '@/lib/market/catalog';
+import { DEFAULT_SHELF_CAPACITY, MARKET_SHELF_COST, MAX_SHELVES } from '@/lib/market/catalog';
 
 // 買一個新貨架：扣幣、新增 market_shelves 列。跟工廠 API 一樣全部用 service role 執行，
 // 一般角色沒有這幾張表的 insert 權限（見 supabase/schema.sql）。
@@ -17,6 +17,17 @@ export async function POST() {
   }
 
   const admin = createAdminClient();
+
+  const { count: shelfCount, error: countError } = await admin
+    .from('market_shelves')
+    .select('id', { count: 'exact', head: true })
+    .eq('user_id', user.id);
+  if (countError) {
+    return NextResponse.json({ error: '買貨架失敗，請稍後再試' }, { status: 500 });
+  }
+  if ((shelfCount ?? 0) >= MAX_SHELVES) {
+    return NextResponse.json({ error: `貨架數量已達上限（最多 ${MAX_SHELVES} 個）` }, { status: 400 });
+  }
 
   const balance = await fetchCurrencyBalance(admin, user.id);
   if (balance < MARKET_SHELF_COST) {
