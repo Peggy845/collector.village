@@ -1,16 +1,16 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import Image from 'next/image';
 
-// 超市貨架的美化動畫骨架（2026-08-02 新增，補上跟工廠 MachineScene 對稱的視覺）。
-// 沿用工廠那套「建築本體不變＋疊加兩個小圖示」的模型，但目前還沒有 Gemini 生成的貨架美術，
-// 所以先用 emoji 佔位（跟工廠當初 a055ed8 那版一樣的做法）。之後 Peggy 生出貨架/店面美術素材、
-// 存進 public/market/ 後，只需要把下面的 emoji 換成 <Image src="...png">，不用動呼叫端（ShelfCard）
-// 或這裡的狀態判斷邏輯——完全比照 idea/gemini-工廠美術prompt.md 那次的換裝流程。
-//
-// 兩個疊加圖示分別代表：
-//   A（右上角）：貨架上有沒有還沒賣完的庫存（不論排隊中還是正在賣）＝有貨，完全沒有庫存＝空蕩蕩。
-//   B（右下角，只在為真時顯示）：貨架空位是不是已經全部塞滿了＝已滿（暫時不用急著補貨）。
+// 超市貨架的美化動畫骨架（2026-08-02 新增，補上跟工廠 MachineScene 對稱的視覺；
+// 2026-08-03 換上 Peggy 用 Gemini 生成的貨架美術，取代 emoji 佔位，流程跟工廠那次換裝一樣）。
+// 沿用工廠那套「建築本體不變＋疊加兩個小圖示」的模型：
+//   - 貨架本體：Peggy 依 idea/gemini-超市美術prompt.md 生成，存在 public/market/shelf.png。
+//   - A（右上角，有沒有庫存）：有貨＝ public/market/icon-bag.png；完全沒有庫存＝空蕩蕩，
+//     沿用灰色蜘蛛網 emoji（沒有特別生一張圖，效果已經夠用）。
+//   - B（右下角，只在為真時顯示，已滿）：直接沿用工廠那批已經生成的 icon-boxes.png，
+//     語意上「一堆箱子」拿來表示「貨架被塞滿了」也說得通，不用另外生一張。
 export default function ShelfScene({
   hasStock,
   isFull,
@@ -25,22 +25,34 @@ export default function ShelfScene({
 }) {
   return (
     <div className="relative flex h-28 items-center justify-center overflow-visible rounded-lg border border-teal-200 bg-teal-50">
-      {/* 建築本體佔位，之後直接換成 <Image src="Gemini生成的貨架圖" /> */}
-      <span className="text-5xl opacity-70">🛒</span>
+      {/* 貨架本體 */}
+      <div className="relative h-24 w-44">
+        <Image src="/market/shelf.png" alt="" fill className="object-contain" sizes="176px" />
+      </div>
 
       {/* A：有沒有庫存 */}
       <span
-        className="absolute right-3 top-1 text-xl"
+        className="absolute right-2 top-1 block h-7 w-7"
         aria-label={hasStock ? '貨架上有商品' : '貨架空蕩蕩'}
         title={hasStock ? '貨架上有商品' : '貨架空蕩蕩'}
       >
-        {hasStock ? <span className="animate-pulse">🛍️</span> : <span className="opacity-40">🕸️</span>}
+        {hasStock ? (
+          <span className="relative block h-full w-full animate-pulse">
+            <Image src="/market/icon-bag.png" alt="" fill className="object-contain" sizes="28px" />
+          </span>
+        ) : (
+          <span className="flex h-full w-full items-center justify-center text-xl opacity-40">🕸️</span>
+        )}
       </span>
 
       {/* B：空位已經塞滿了，只在為真時顯示 */}
       {isFull && (
-        <span className="absolute bottom-1 right-3 text-xl" aria-label="貨架已經滿了" title="貨架已經滿了">
-          📦
+        <span
+          className="absolute bottom-1 right-2 block h-7 w-7"
+          aria-label="貨架已經滿了"
+          title="貨架已經滿了"
+        >
+          <Image src="/factory/icon-boxes.png" alt="" fill className="object-contain" sizes="28px" />
         </span>
       )}
 
