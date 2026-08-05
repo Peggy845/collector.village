@@ -703,6 +703,13 @@ Vercel 專案 `qa-clinic-taiwan/collector-village` 是沿用舊靜態佔位頁�
 - Peggy 生完存進 `public/market/{shelf,icon-bag}.png`。`icon-bag.png` 跟之前工廠小圖示遇到一樣的問題：畫布留白過多（677×369裡實際內容只佔198×255），用 `sharp` 抓 alpha bounding box 裁切後才拿來用；`shelf.png` 是建築本體，留白比例跟工廠建築圖差不多，不用裁。
 - `components/market/ShelfScene.tsx` 換上真圖，互動邏輯（貨架有沒有庫存/滿不滿）完全沒動。實測：貨架本體正常顯示，上架一批海報後確認「有庫存」購物袋圖示正確出現。**已 commit + push**（`a63e422`）。
 
+### API 路由層測試 v1（2026-08-05 新增）
+
+- 呼應已知缺口第7項最後剩下的一塊：`npm run test` 原本 67 個測試全部是純邏輯層（`lib/`），API 路由本身（`app/api/**/route.ts`）完全沒測過，怕的是登入檢查漏寫、或 request 格式驗證被改壞都不會被抓到。這次不依賴美術/CSV 進度，Peggy 選來當天的獨立工作項目。
+- **技術作法**：用 `vi.mock('@/lib/supabase/server')` 跟 `vi.mock('@/lib/supabase/admin')` 整個模組替換掉，測試裡直接控制 `createClient()` 回傳的假 `auth.getUser()` 結果（`{ user: null }` 模擬未登入、`{ user: { id } }` 模擬已登入），不用真的連 Supabase，也繞開了 `next/headers` 的 `cookies()`（原本以為要 mock 這個很麻煩，實際上整個 `@/lib/supabase/server` 模組被 mock 掉後 `cookies()` 根本不會被呼叫到，比預期簡單）。路由 handler 直接 import 進來當一般函式呼叫，傳入標準 `Request` 物件即可，`next/server` 的 `NextResponse.json()` 在 vitest 的 node 環境下可以直接跑，不需要真的啟動 Next.js server。
+- **測試範圍**：每一支路由都測「未登入回傳 401」；另外對 6 支「request 格式驗證發生在呼叫 admin client 之前」的路由（`design-studio/{delete,produce,save}`、`factory/collect`、`market/{list,delist}`）補了格式錯誤回 400 的案例；`factory/start` 因為驗證邏輯整個委派給 `lib/factory/startProduction.ts`，改成 mock `startProductionBatch` 驗證路由層有正確把它的回傳結果（成功/失敗各自的 status/error）轉成對應的 HTTP 回應；`notifications/summary` 是 GET 且未登入時刻意回傳零值物件而非 401，也另外驗證了這個行為。沒特別測的是幾支完全沒有 request body、業務規則檢查直接寫在路由裡（沒抽到 `lib/`）的路由（`account/delete`、`factory/collect-all`、`factory/upgrade-warehouse`、`market/{buy-shelf,toggle-auto-restock}`），這些只測了 401，业务規則本身要嘛之後抽出來測、要嘛留給真人測試。
+- 新增 14 個 `route.test.ts`（跟路由檔案同資料夾，比照 `lib/` 既有慣例），共 35 個測試案例，`npm run test` 現在共 102 個測試全過。純新增測試，沒改任何路由的既有行為，`tsc`／`lint`／`build` 全過。
+
 ### 已知缺口 / 下一步待辦（依優先順序）
 
 1. ~~修正 `products.csv` 中 2 筆錯位資料並重新匯入~~ **已於 2026-07-31 完成**：修正第41、66列的欄位錯位（manufacturer/official_price 補回 BANDAI/¥500、USJ/¥3200，release_date/tags/image_url/source_url 對應歸位）；查證資料庫發現這兩筆（product_code 40、65）其實已存在且資料正確（id 401、402），推測先前已用某種方式補上，此次修正 CSV 只是讓原始檔案跟資料庫內容一致，重跑 `npm run import:products` 確認全部 402 筆皆判定為既有資料，無需新增。
@@ -711,4 +718,4 @@ Vercel 專案 `qa-clinic-taiwan/collector-village` 是沿用舊靜態佔位頁�
 4. **圖片儲存規劃已定案（2026-07-30）**：大量商品圖片（光巨人可能上千張，之後還有其他IP）不進 git repo（避免 repo 體積暴增、撞 GitHub 檔案大小限制），沿用專案已在用的 Supabase Storage，不用另外接 Google 雲端硬碟。**等 Peggy 實際建立本機審核用資料夾、開始上傳圖片時**，記得把該資料夾加進 `.gitignore`；真正要在網站上顯示的圖片才上傳到 Supabase Storage，網站只存路徑/網址。
 5. ~~products.csv 資料審核流程已定案（2026-07-30）~~ **腳本邏輯已於 2026-08-02 補上（見下方「CSV 覆蓋更新邏輯 v1」小節），只等 Peggy 實際校對完、CSV 出現「已審核」區塊時直接使用**：Peggy 逐行校對時採「不刪除任何東西，審核確認沒問題的那一列剪下貼到CSV下方新區塊」的做法，`scripts/import-products.mjs` 現在會辨識「已審核」分隔列，依 `product_code` 比對覆蓋更新既有資料列（分隔列前的資料維持原本的新增流程不變）。**2026-08-01 補充：此項工作原本暫緩，Peggy 決定先跟超市系統並行處理，見第32項；2026-08-02 趁校對還沒完成時先把腳本邏輯寫好測好。**
 6. ~~超市系統 v1 待真人測試~~ **已於 2026-08-01～08-02 經過多輪真人測試並修掉抓到的bug**（見上方「超市系統 v1」「Peggy 真人測試抓到的問題與後續調整」等小節），完整流程（買貨架→上架→賣出倒數→收款→下架→倉庫爆倉擋生產）都已驗證過。經濟數字（貨架150幣、倉庫升級500幣/+50、新手起始150幣+1貨架、貨架上限10個）仍是草案，集中在 `lib/market/catalog.ts`，試玩覺得不平衡可以再調。
-7. ~~完全沒有自動化測試，貨架計時數學已經有點複雜了~~ **已於 2026-08-02 補上第一批（見上方「自動化測試 v1」小節）**：涵蓋貨架剩餘/賣出計算、上架合併排隊、自動上架配貨、下架排隊遞補、工廠排隊接續共 29 個測試。**2026-08-03 補上剩下的兩塊**（見上方「超市：貨架數量上限 + 收款/暫停營業補測試」小節）：收款併發鎖、超市暫停/重新營業的時間平移，現在共 67 個測試，`npm run test` 可跑。仍未涵蓋：API 路由層本身（登入驗證、request 格式檢查），這牽涉到要 mock Next.js 的 `cookies()`，之後有動到再視情況補。
+7. ~~完全沒有自動化測試，貨架計時數學已經有點複雜了~~ **已於 2026-08-02 補上第一批（見上方「自動化測試 v1」小節）**：涵蓋貨架剩餘/賣出計算、上架合併排隊、自動上架配貨、下架排隊遞補、工廠排隊接續共 29 個測試。**2026-08-03 補上剩下的兩塊**（見上方「超市：貨架數量上限 + 收款/暫停營業補測試」小節）：收款併發鎖、超市暫停/重新營業的時間平移，現在共 67 個測試。**2026-08-05 補上 API 路由層（見下方「API 路由層測試 v1」小節）**：涵蓋全部 14 支路由的登入驗證+request 格式檢查，現在共 102 個測試，`npm run test` 可跑。仍未涵蓋：路由內直接寫（沒抽到 lib/ 共用函式）的業務規則檢查（例如買貨架的餘額/數量上限判斷、升級倉庫的餘額判斷），這些要嘛之後抽出來寫單元測試、要嘛留給真人測試涵蓋。
