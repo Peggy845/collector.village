@@ -2,7 +2,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 
 // 暫停/重新營業核心邏輯，從 app/api/market/toggle-open/route.ts 抽出來方便寫單元測試
 // （見 lib/market/toggleOpen.test.ts）。重新營業時把「暫停了多久」整批加回使用者名下所有
-// market_shelf_slots 的 active_from，讓凍結期間不會被誤算成賣出時間流逝（見該路由檔案
+// market_furniture_slots 的 active_from，讓凍結期間不會被誤算成賣出時間流逝（見該路由檔案
 // 開頭的完整說明）。
 
 export async function closeMarket(
@@ -27,14 +27,17 @@ export async function reopenMarket(
   const closedAt = userRow?.market_closed_at ? new Date(userRow.market_closed_at).getTime() : now;
   const pausedMs = Math.max(0, now - closedAt);
 
-  const { data: shelves } = await admin.from('market_shelves').select('id').eq('user_id', userId);
-  const shelfIds = ((shelves ?? []) as { id: number }[]).map((s) => s.id);
+  const { data: furniture } = await admin.from('market_furniture').select('id').eq('user_id', userId);
+  const furnitureIds = ((furniture ?? []) as { id: number }[]).map((f) => f.id);
 
-  if (shelfIds.length > 0 && pausedMs > 0) {
-    const { data: slots } = await admin.from('market_shelf_slots').select('id, active_from').in('shelf_id', shelfIds);
+  if (furnitureIds.length > 0 && pausedMs > 0) {
+    const { data: slots } = await admin
+      .from('market_furniture_slots')
+      .select('id, active_from')
+      .in('furniture_id', furnitureIds);
     for (const slot of (slots ?? []) as { id: number; active_from: string }[]) {
       const newActiveFrom = new Date(new Date(slot.active_from).getTime() + pausedMs).toISOString();
-      await admin.from('market_shelf_slots').update({ active_from: newActiveFrom }).eq('id', slot.id);
+      await admin.from('market_furniture_slots').update({ active_from: newActiveFrom }).eq('id', slot.id);
     }
   }
 

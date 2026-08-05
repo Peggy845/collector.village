@@ -7,7 +7,7 @@ import { createClient } from '@/lib/supabase/client';
 
 interface NotificationSummary {
   readyBatches: number;
-  shelvesNeedingRestock: number;
+  furnitureNeedingRestock: number;
   warehouseEmpty: boolean;
 }
 
@@ -58,7 +58,7 @@ export default function Header() {
   }
 
   const hasNotif =
-    !!loggedIn && !!notif && (notif.readyBatches > 0 || notif.shelvesNeedingRestock > 0 || notif.warehouseEmpty);
+    !!loggedIn && !!notif && (notif.readyBatches > 0 || notif.furnitureNeedingRestock > 0 || notif.warehouseEmpty);
 
   return (
     <header className="border-b border-neutral-200">
@@ -120,9 +120,9 @@ export default function Header() {
                 🏭 有商品完成，快去收成
               </Link>
             )}
-            {notif!.shelvesNeedingRestock > 0 && (
+            {notif!.furnitureNeedingRestock > 0 && (
               <Link href="/market" className="underline hover:text-amber-950">
-                🏪 有 {notif!.shelvesNeedingRestock} 個貨架空了，快去上架
+                🏪 有 {notif!.furnitureNeedingRestock} 個家具空了，快去上架
               </Link>
             )}
             {notif!.warehouseEmpty && (

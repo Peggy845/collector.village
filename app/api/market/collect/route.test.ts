@@ -6,7 +6,9 @@ vi.mock('@/lib/supabase/admin', () => ({ createAdminClient: vi.fn() }));
 import { createClient } from '@/lib/supabase/server';
 import { POST } from './route';
 
-describe('POST /api/market/buy-shelf', () => {
+// 這支路由本身沒有 request body，唯一需要在路由層驗證的是登入檢查——
+// 實際的收款/樂觀鎖邏輯已經在 lib/market/collect.test.ts 測過。
+describe('POST /api/market/collect', () => {
   it('未登入回傳 401', async () => {
     vi.mocked(createClient).mockResolvedValue({
       auth: { getUser: async () => ({ data: { user: null } }) },

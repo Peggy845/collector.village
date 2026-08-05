@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { findFormatByKey } from '@/lib/factory/catalog';
 import { computeSlotSoldSoFar } from '@/lib/market/catalog';
-import type { MarketShelfSlot } from '@/types/database';
+import type { MarketFurnitureSlot } from '@/types/database';
 
 // 本日營業額（見 PROJECT_PROGRESS.md 已定案項目 32）：賣出的錢不會直接變成可花的遊戲幣，
 // 要玩家自己按「入帳」才會真的存進餘額——這樣才有「在經營一間店」的感覺，而不是東西一賣掉
@@ -15,7 +15,7 @@ export default function RevenuePanel({
   marketOpen,
   marketClosedAt,
 }: {
-  slots: MarketShelfSlot[];
+  slots: MarketFurnitureSlot[];
   marketOpen: boolean;
   marketClosedAt: string | null;
 }) {

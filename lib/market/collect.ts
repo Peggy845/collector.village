@@ -1,7 +1,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { findFormatByKey } from '@/lib/factory/catalog';
 import { computeSlotRemaining, computeSlotSoldSoFar } from './catalog';
-import type { MarketShelfSlot } from '@/types/database';
+import type { MarketFurnitureSlot } from '@/types/database';
 
 // 收款（入帳）核心邏輯，從 app/api/market/collect/route.ts 抽出來方便寫單元測試
 // （見 lib/market/collect.test.ts）——路由只負責認證跟把回傳的營收寫進遊戲幣帳本，
@@ -15,12 +15,15 @@ export async function collectMarketRevenue(
   userId: string,
   now: number = Date.now()
 ): Promise<number> {
-  const { data: shelves } = await admin.from('market_shelves').select('id').eq('user_id', userId);
-  const shelfIds = ((shelves ?? []) as { id: number }[]).map((s) => s.id);
-  if (shelfIds.length === 0) return 0;
+  const { data: furniture } = await admin.from('market_furniture').select('id').eq('user_id', userId);
+  const furnitureIds = ((furniture ?? []) as { id: number }[]).map((f) => f.id);
+  if (furnitureIds.length === 0) return 0;
 
-  const { data: slotsData } = await admin.from('market_shelf_slots').select('*').in('shelf_id', shelfIds);
-  const slots = (slotsData ?? []) as MarketShelfSlot[];
+  const { data: slotsData } = await admin
+    .from('market_furniture_slots')
+    .select('*')
+    .in('furniture_id', furnitureIds);
+  const slots = (slotsData ?? []) as MarketFurnitureSlot[];
 
   let totalRevenue = 0;
 
@@ -35,7 +38,7 @@ export async function collectMarketRevenue(
 
     if (remaining === 0) {
       const { data: deleted } = await admin
-        .from('market_shelf_slots')
+        .from('market_furniture_slots')
         .delete()
         .eq('id', slot.id)
         .eq('collected_quantity', slot.collected_quantity)
@@ -45,7 +48,7 @@ export async function collectMarketRevenue(
       }
     } else {
       const { data: updated } = await admin
-        .from('market_shelf_slots')
+        .from('market_furniture_slots')
         .update({ collected_quantity: soldSoFar })
         .eq('id', slot.id)
         .eq('collected_quantity', slot.collected_quantity)

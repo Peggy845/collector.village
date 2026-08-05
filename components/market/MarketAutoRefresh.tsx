@@ -3,7 +3,7 @@
 import { useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { MARKET_SELL_MINUTES_PER_UNIT, computeSlotRemaining, isSlotActive } from '@/lib/market/catalog';
-import type { MarketShelfSlot } from '@/types/database';
+import type { MarketFurnitureSlot } from '@/types/database';
 
 // 自動上架模式（見 lib/market/restock.ts）開啟時，補貨要跟著「貨架真的少賣掉一件」的
 // 時間點走，畫面才不會停在舊資料（見 Peggy 2026-08-02 實測回報）。
@@ -22,7 +22,7 @@ export default function MarketAutoRefresh({
   marketOpen,
 }: {
   enabled: boolean;
-  slots: MarketShelfSlot[];
+  slots: MarketFurnitureSlot[];
   marketOpen: boolean;
 }) {
   const router = useRouter();

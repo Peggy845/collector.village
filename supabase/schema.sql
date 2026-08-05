@@ -93,8 +93,8 @@ begin
   insert into public.game_currency_ledger (user_id, amount, reason)
   values (new.id, 150, 'welcome_bonus');
 
-  insert into public.market_shelves (user_id, slot_capacity)
-  values (new.id, 2);
+  insert into public.market_furniture (user_id, furniture_type, capacity, grid_x, grid_y, facing)
+  values (new.id, 'bookshelf', 10, 0, 0, 'down');
 
   return new;
 end;
@@ -277,25 +277,32 @@ create table if not exists public.factory_inventory_items (
 );
 
 -- =========================================
--- 11. 超市系統 v1（見「已定案項目 32」：貨架計時器＋倉庫容量上限）
+-- 11. 超市系統 v2：空間網格家具擺放（見「已定案項目 32」，2026-08-05 取代 v1 平鋪貨架列表）
 -- =========================================
 -- 設計核心：跟工廠生產佇列（見上方第10節）用同一套「不跑背景排程，讀取時用時間差計算」的做法。
--- 一個貨架(market_shelves)最多同時放 slot_capacity 種商品(market_shelf_slots)；每個 slot 的
--- active_from 在「上架當下」就算好、之後不再變動（跟工廠 ready_at 是同一個精神：新排的 slot
--- 接在同一貨架前一個 slot 的「預計賣完時間」之後才開始算，貨架前面沒東西賣就從現在開始算）。
--- 每分鐘賣 1 件是貨架整體共用（不是每個 slot 各自），所以同一貨架同時只有一個 slot 在賣，
--- 其餘 slot 依 slot_index 排隊等前面的賣完(以排程時間判斷，不需要玩家真的按「收款」才輪到下一個，
--- 呼應工廠佇列「前一批沒收成也不擋下一批開始跑」的既有邏輯)。
+-- 玩家在 30×30 頂視角網格（GRID_SIZE，見 lib/market/placement.ts）上放置家具（market_furniture，
+-- 書櫃/洞洞板/透明堆疊箱/收銀機四種，見 lib/market/furniture.ts），每個家具最多同時放
+-- capacity 件商品(market_furniture_slots)，只能放該家具類型允許的商品格式（見
+-- lib/market/furniture.ts 的 isFormatAllowedForFurniture，收銀機是純裝飾，capacity 為 null、
+-- 不能放任何商品）。每個 slot 的 active_from 在「上架當下」就算好、之後不再變動（跟工廠
+-- ready_at 是同一個精神：新排的 slot 接在同一家具前一個 slot 的「預計賣完時間」之後才開始算，
+-- 家具前面沒東西賣就從現在開始算）。每分鐘賣 1 件是同一家具內共用（不是每個 slot 各自），
+-- 所以同一家具同時只有一個 slot 在賣，其餘 slot 依排程時間排隊等前面的賣完（不需要玩家真的
+-- 按「收款」才輪到下一個，呼應工廠佇列「前一批沒收成也不擋下一批開始跑」的既有邏輯）。
 -- 「賣了多少、該入帳多少遊戲幣」不是即時累加的背景工作，而是玩家按「收款」時，用
 -- （目前用 active_from+quantity 算出的已售數量 - collected_quantity 已入帳過的數量）算出差額才入帳，
 -- 這個差額算法是冪等的（同一秒內按兩次收款，第二次差額是0，不會重複入帳）。
+-- 家具在網格上的座標(grid_x/grid_y)跟朝向(facing，上/下兩種)決定放置合法性：每個家具的
+-- 「展示面朝向那一格」必須淨空，不能被其他家具佔用（左右並排不受限制），見 lib/market/placement.ts
+-- 的 validatePlacement——這是唯一限制玩家能放幾個家具的機制，v1（貨架平鋪列表）原本有的
+-- MAX_SHELVES 數字上限已經拿掉。
 
 -- 工廠倉庫容量上限：促成「倉庫爆倉→得去超市上架清空間或花錢升級倉庫」的資源壓力循環，
 -- 呼應「已定案項目 32」。草案數字（可調整）：預設 300、每次升級 +50，升級費用見 lib/market/catalog.ts。
 alter table public.users add column if not exists warehouse_capacity int not null default 300;
 
--- 超市營業中／暫停營業（2026-08-01 補充，見「已定案項目 32」）：全站只有一個開關，不分貨架。
--- 暫停營業時所有貨架的倒數都凍結，玩家仍可上架/下架，只是不會有東西被賣掉。
+-- 超市營業中／暫停營業（2026-08-01 補充，見「已定案項目 32」）：全站只有一個開關，不分家具。
+-- 暫停營業時所有家具的倒數都凍結，玩家仍可上架/下架，只是不會有東西被賣掉。
 -- market_closed_at 只在暫停營業期間有值，重新營業時用「現在時間 - market_closed_at」算出暫停了多久，
 -- 把使用者名下所有 slot 的 active_from 整批往後推移同樣的時間量，讓「凍結」的效果延續到重新營業後
 -- （不需要另外記錄多段暫停區間，見 app/api/market/toggle-open/route.ts 的實作說明）。
@@ -304,21 +311,34 @@ alter table public.users add column if not exists market_closed_at timestamptz;
 
 -- 手動上架／自動上架模式（見「已定案項目 32」補充、lib/market/restock.ts）：預設手動上架
 -- （維持原本行為，玩家自己上架、賣完就停在那裡）；開啟自動上架後，系統會在玩家造訪 /market
--- 或導覽列輪詢通知摘要時，自動把貨架補滿，一路補到工廠倉庫庫存全部上架完為止。
+-- 或導覽列輪詢通知摘要時，自動把相容格式的家具補滿，一路補到工廠倉庫庫存全部上架完為止
+-- （不相容的品項會留在倉庫不動，見 lib/market/restock.ts）。
 alter table public.users add column if not exists market_auto_restock boolean not null default false;
 
-create table if not exists public.market_shelves (
+-- 2026-08-05：只有 Peggy 測試帳號在用超市系統，沒有正式玩家資料需要保留，直接把 v1 的
+-- market_shelves／market_shelf_slots 整個 drop 重建成 market_furniture／market_furniture_slots——
+-- 舊資料沒有座標／朝向／家具種類，逐列搬遷沒有意義。這兩行 drop 只有第一次跑這份 schema.sql
+-- 時真的會刪到東西，之後重複執行都是 no-op（表已經不存在，if exists 保護）。
+drop table if exists public.market_shelf_slots cascade;
+drop table if exists public.market_shelves cascade;
+
+create table if not exists public.market_furniture (
   id serial primary key,
   user_id uuid references public.users(id) on delete cascade not null,
-  capacity int not null,                     -- 貨架容量以「總件數」計算，不分商品種類（2026-08-01 修正，
-                                              -- 原本誤設計成「最多幾種商品」，改成「總共能放幾件」，
-                                              -- 玩家可以自由分配要放幾種、各放幾件，只要總數不超過容量）
-  created_at timestamp default now()
+  furniture_type text not null
+    check (furniture_type in ('bookshelf','pegboard','stacking_bin','cashier')),
+  capacity int,                     -- 商品類家具用 DEFAULT_FURNITURE_CAPACITY（見 lib/market/catalog.ts）；
+                                     -- 收銀機是 null（純裝飾，沒有容量概念，不能放任何商品）
+  grid_x int not null check (grid_x >= 0 and grid_x < 30),
+  grid_y int not null check (grid_y >= 0 and grid_y < 30),
+  facing text not null check (facing in ('up','down')),
+  created_at timestamp default now(),
+  unique (user_id, grid_x, grid_y)  -- defense-in-depth，主要放置規則驗證在 lib/market/placement.ts
 );
 
-create table if not exists public.market_shelf_slots (
+create table if not exists public.market_furniture_slots (
   id serial primary key,
-  shelf_id int references public.market_shelves(id) on delete cascade not null,
+  furniture_id int references public.market_furniture(id) on delete cascade not null,
   format_key text not null,
   design_id int references public.factory_designs(id) not null,
   quantity int not null,                     -- 上架當下的原始數量，之後不變動（賣掉多少用 active_from 推算）
@@ -326,20 +346,6 @@ create table if not exists public.market_shelf_slots (
   active_from timestamptz not null,          -- 這個 slot 實際開始倒數賣出的時間點，上架當下算好後不再變動
   listed_at timestamp default now()          -- 純記錄用，上架的當下時間（跟 active_from 不同，可能要排隊等）
 );
-
--- 2026-08-01 修正：拿掉原本「slot_index 代表第幾個固定格子」的設計（容量已經改成算總件數，
--- 不再有固定格數的概念），已存在的資料庫如果還有舊欄位就在這裡清掉，新建的表不會有這個欄位。
-do $$
-begin
-  if exists (
-    select 1 from information_schema.columns
-    where table_schema = 'public' and table_name = 'market_shelves' and column_name = 'slot_capacity'
-  ) then
-    alter table public.market_shelves rename column slot_capacity to capacity;
-  end if;
-end $$;
-alter table public.market_shelf_slots drop column if exists slot_index;
-update public.market_shelves set capacity = 10 where capacity = 2;
 
 -- =========================================
 -- 12. 設計坊系統 v1（玩家自繪像素設計圖庫，見 idea/project-brief.md 第4、7、9節）
@@ -377,7 +383,7 @@ create table if not exists public.player_designs (
 create index if not exists player_designs_user_id_status_idx on public.player_designs(user_id, status);
 
 -- factory_designs 擴充（沿用既有表，不建第二個生產快照表）：讓玩家自繪設計也能寫進這張表，
--- 維持「下游生產鏈（factory_production_batches／factory_inventory_items／market_shelf_slots）
+-- 維持「下游生產鏈（factory_production_batches／factory_inventory_items／market_furniture_slots）
 -- 全部只認 factory_designs.id」的既有結構完全不變。每次「儲存設計」「覆蓋」「直接生產」都在這裡
 -- 新插入一列（不更新既有列），讓 factory_designs 維持「不可變版本快照」——跟 game_currency_ledger
 -- 「只累加不修改」同精神，只是這裡累加的是「版本」而非「金額」。
@@ -590,17 +596,17 @@ drop policy if exists "own inventory select" on public.factory_inventory_items;
 create policy "own inventory select" on public.factory_inventory_items
   for select using (auth.uid() = user_id);
 
--- market_shelves / market_shelf_slots：使用者只能查看自己的紀錄，寫入（買貨架／上架／下架／收款）
--- 一律透過 app/api/market/* 路由用 service role 執行，理由跟工廠系統一致（見上方說明）。
-alter table public.market_shelves enable row level security;
-drop policy if exists "own shelves select" on public.market_shelves;
-create policy "own shelves select" on public.market_shelves
+-- market_furniture / market_furniture_slots：使用者只能查看自己的紀錄，寫入（買家具／移動／
+-- 上架／下架／收款）一律透過 app/api/market/* 路由用 service role 執行，理由跟工廠系統一致（見上方說明）。
+alter table public.market_furniture enable row level security;
+drop policy if exists "own furniture select" on public.market_furniture;
+create policy "own furniture select" on public.market_furniture
   for select using (auth.uid() = user_id);
 
-alter table public.market_shelf_slots enable row level security;
-drop policy if exists "own shelf slots select" on public.market_shelf_slots;
-create policy "own shelf slots select" on public.market_shelf_slots
-  for select using (auth.uid() = (select user_id from public.market_shelves where id = shelf_id));
+alter table public.market_furniture_slots enable row level security;
+drop policy if exists "own furniture slots select" on public.market_furniture_slots;
+create policy "own furniture slots select" on public.market_furniture_slots
+  for select using (auth.uid() = (select user_id from public.market_furniture where id = furniture_id));
 
 -- =========================================
 -- Storage：collection-photos bucket

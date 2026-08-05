@@ -5,7 +5,7 @@ import { closeMarket, reopenMarket } from '@/lib/market/toggleOpen';
 
 // 切換超市「營業中／暫停營業」（見 PROJECT_PROGRESS.md 已定案項目 32）。
 // 暫停：記下 market_closed_at，讀取畫面時會用這個時間點當作「凍結的現在」，倒數不再前進。
-// 重新營業：把「暫停了多久」整批加回使用者名下所有 market_shelf_slots 的 active_from，
+// 重新營業：把「暫停了多久」整批加回使用者名下所有 market_furniture_slots 的 active_from，
 // 讓凍結期間不會被誤算成「賣出時間流逝了」——這樣讀取端完全不用知道市場開關狀態，
 // 唯一需要特殊處理的只有「暫停中」畫面顯示要用凍結時間而非真實現在（見 ShelfCard.tsx）。
 // 實際的時間平移邏輯在 lib/market/toggleOpen.ts，抽出來方便寫單元測試。

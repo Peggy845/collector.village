@@ -23,34 +23,34 @@ describe('closeMarket', () => {
 });
 
 describe('reopenMarket', () => {
-  it('把暫停的時長整批加回名下所有貨架格子的 active_from', async () => {
+  it('把暫停的時長整批加回名下所有家具格子的 active_from', async () => {
     const fake = new FakeSupabase();
     const closedAt = new Date('2026-08-03T10:00:00Z').getTime();
     const reopenAt = closedAt + 5 * 60_000; // 暫停了5分鐘
     fake.seed('users', [{ id: 'u1', market_open: false, market_closed_at: new Date(closedAt).toISOString() }]);
-    fake.seed('market_shelves', [{ id: 1, user_id: 'u1' }]);
+    fake.seed('market_furniture', [{ id: 1, user_id: 'u1' }]);
     const originalActiveFrom = new Date(closedAt - 60_000).toISOString();
-    fake.seed('market_shelf_slots', [
-      { id: 100, shelf_id: 1, format_key: 'postcard', design_id: 1, quantity: 10, collected_quantity: 0, active_from: originalActiveFrom, listed_at: originalActiveFrom },
+    fake.seed('market_furniture_slots', [
+      { id: 100, furniture_id: 1, format_key: 'postcard', design_id: 1, quantity: 10, collected_quantity: 0, active_from: originalActiveFrom, listed_at: originalActiveFrom },
     ]);
 
     const { error, pausedMs } = await reopenMarket(admin(fake), 'u1', reopenAt);
 
     expect(error).toBe(false);
     expect(pausedMs).toBe(5 * 60_000);
-    const slot = fake.rows('market_shelf_slots')[0];
+    const slot = fake.rows('market_furniture_slots')[0];
     expect(new Date(slot.active_from as string).getTime()).toBe(new Date(originalActiveFrom).getTime() + 5 * 60_000);
     const userRow = fake.rows('users')[0];
     expect(userRow.market_open).toBe(true);
     expect(userRow.market_closed_at).toBeNull();
   });
 
-  it('沒有貨架時安全地什麼都不用平移，只切回營業中', async () => {
+  it('沒有家具時安全地什麼都不用平移，只切回營業中', async () => {
     const fake = new FakeSupabase();
     const closedAt = new Date('2026-08-03T10:00:00Z').getTime();
     fake.seed('users', [{ id: 'u1', market_open: false, market_closed_at: new Date(closedAt).toISOString() }]);
-    fake.seed('market_shelves', []);
-    fake.seed('market_shelf_slots', []);
+    fake.seed('market_furniture', []);
+    fake.seed('market_furniture_slots', []);
 
     const { error, pausedMs } = await reopenMarket(admin(fake), 'u1', closedAt + 60_000);
 
@@ -63,15 +63,15 @@ describe('reopenMarket', () => {
     const fake = new FakeSupabase();
     const now = new Date('2026-08-03T10:00:00Z').getTime();
     fake.seed('users', [{ id: 'u1', market_open: false, market_closed_at: null }]);
-    fake.seed('market_shelves', [{ id: 1, user_id: 'u1' }]);
+    fake.seed('market_furniture', [{ id: 1, user_id: 'u1' }]);
     const originalActiveFrom = new Date(now - 60_000).toISOString();
-    fake.seed('market_shelf_slots', [
-      { id: 101, shelf_id: 1, format_key: 'postcard', design_id: 1, quantity: 10, collected_quantity: 0, active_from: originalActiveFrom, listed_at: originalActiveFrom },
+    fake.seed('market_furniture_slots', [
+      { id: 101, furniture_id: 1, format_key: 'postcard', design_id: 1, quantity: 10, collected_quantity: 0, active_from: originalActiveFrom, listed_at: originalActiveFrom },
     ]);
 
     const { pausedMs } = await reopenMarket(admin(fake), 'u1', now);
 
     expect(pausedMs).toBe(0);
-    expect(fake.rows('market_shelf_slots')[0].active_from).toBe(originalActiveFrom);
+    expect(fake.rows('market_furniture_slots')[0].active_from).toBe(originalActiveFrom);
   });
 });

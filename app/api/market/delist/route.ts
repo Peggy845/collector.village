@@ -3,9 +3,9 @@ import { createClient } from '@/lib/supabase/server';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { findFormatByKey } from '@/lib/factory/catalog';
 import { computeSlotRemaining, computeSlotSoldSoFar, computeTimeSavedOnEarlyDelist } from '@/lib/market/catalog';
-import type { MarketShelfSlot } from '@/types/database';
+import type { MarketFurnitureSlot } from '@/types/database';
 
-// 下架：把貨架上還沒賣完的數量收回工廠倉庫。下架前先把「已經賣掉但還沒按收款」的部分結算入帳，
+// 下架：把家具上還沒賣完的數量收回工廠倉庫。下架前先把「已經賣掉但還沒按收款」的部分結算入帳，
 // 不會因為下架而讓玩家平白損失已經賣出的錢（見 PROJECT_PROGRESS.md 已定案項目 32）。
 export async function POST(request: Request) {
   const supabase = await createClient();
@@ -26,15 +26,15 @@ export async function POST(request: Request) {
   const admin = createAdminClient();
 
   const { data: slot } = await admin
-    .from('market_shelf_slots')
-    .select('*, market_shelves!inner(user_id)')
+    .from('market_furniture_slots')
+    .select('*, market_furniture!inner(user_id)')
     .eq('id', slotId)
-    .eq('market_shelves.user_id', user.id)
+    .eq('market_furniture.user_id', user.id)
     .maybeSingle();
   if (!slot) {
     return NextResponse.json({ error: '找不到這個上架項目' }, { status: 400 });
   }
-  const typedSlot = slot as MarketShelfSlot & { market_shelves: { user_id: string } };
+  const typedSlot = slot as MarketFurnitureSlot & { market_furniture: { user_id: string } };
 
   const format = findFormatByKey(typedSlot.format_key);
   if (!format) {
@@ -81,28 +81,28 @@ export async function POST(request: Request) {
     }
   }
 
-  const { error: deleteError } = await admin.from('market_shelf_slots').delete().eq('id', slotId);
+  const { error: deleteError } = await admin.from('market_furniture_slots').delete().eq('id', slotId);
   if (deleteError) {
     return NextResponse.json({ error: '下架失敗，請稍後再試' }, { status: 500 });
   }
 
-  // 下架的格子原本佔用了貨架時間軸上一段「保留給它的排程時間」（從 active_from 到
+  // 下架的格子原本佔用了家具時間軸上一段「保留給它的排程時間」（從 active_from 到
   // active_from+quantity分鐘），提早下架代表這段時間有一部分沒被真的用到，排在它後面的格子
   // 不該繼續傻等到原本排定的時間才開始賣——要把這段「省下來的時間」整批補回去，讓後面的格子
   // 提前開始（2026-08-01 修正：Peggy 實測抓到「下架後，排在後面的東西沒有跟著往前遞補」的 bug）。
   // 算法：這個格子原本「排定的完整結束時間」減去「現在或它原本開始時間，取比較晚的那個」，
-  // 差額就是省下來的時間；同貨架上排定時間點在它之後的格子，通通往前移動這段差額。
+  // 差額就是省下來的時間；同家具上排定時間點在它之後的格子，通通往前移動這段差額。
   const timeSavedMs = computeTimeSavedOnEarlyDelist(typedSlot, now);
 
   if (timeSavedMs > 0) {
     const { data: laterSlots } = await admin
-      .from('market_shelf_slots')
+      .from('market_furniture_slots')
       .select('id, active_from')
-      .eq('shelf_id', typedSlot.shelf_id)
+      .eq('furniture_id', typedSlot.furniture_id)
       .gte('active_from', typedSlot.active_from);
     for (const later of laterSlots ?? []) {
       const newActiveFrom = new Date(new Date(later.active_from).getTime() - timeSavedMs).toISOString();
-      await admin.from('market_shelf_slots').update({ active_from: newActiveFrom }).eq('id', later.id);
+      await admin.from('market_furniture_slots').update({ active_from: newActiveFrom }).eq('id', later.id);
     }
   }
 

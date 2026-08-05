@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
+import { FakeSupabase } from '../../../../test/fakeSupabase';
 
 vi.mock('@/lib/supabase/server', () => ({ createClient: vi.fn() }));
 
@@ -16,6 +17,24 @@ describe('GET /api/notifications/summary', () => {
     const res = await GET();
     expect(res.status).toBe(200);
     const body = await res.json();
-    expect(body).toEqual({ readyBatches: 0, shelvesNeedingRestock: 0, warehouseEmpty: false });
+    expect(body).toEqual({ readyBatches: 0, furnitureNeedingRestock: 0, warehouseEmpty: false });
+  });
+
+  it('只有收銀機（純裝飾，capacity 為 null）時不會誤報 furnitureNeedingRestock（2026-08-05 新增）', async () => {
+    const fake = new FakeSupabase();
+    fake.seed('users', [{ id: 'u1', market_open: true, market_closed_at: null }]);
+    fake.seed('market_furniture', [{ id: 1, user_id: 'u1', furniture_type: 'cashier', capacity: null, created_at: new Date(0).toISOString() }]);
+    fake.seed('market_furniture_slots', []);
+    fake.seed('factory_production_batches', []);
+    fake.seed('factory_inventory_items', []);
+
+    vi.mocked(createClient).mockResolvedValue({
+      auth: { getUser: async () => ({ data: { user: { id: 'u1' } } }) },
+      from: fake.from.bind(fake),
+    } as never);
+
+    const res = await GET();
+    const body = await res.json();
+    expect(body.furnitureNeedingRestock).toBe(0);
   });
 });

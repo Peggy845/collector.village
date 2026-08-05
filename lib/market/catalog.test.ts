@@ -6,14 +6,14 @@ import {
   isSlotActive,
   minutesUntilSoldOut,
 } from './catalog';
-import type { MarketShelfSlot } from '@/types/database';
+import type { MarketFurnitureSlot } from '@/types/database';
 
 const MIN = 60 * 1000;
 
-function slot(overrides: Partial<MarketShelfSlot> = {}): MarketShelfSlot {
+function slot(overrides: Partial<MarketFurnitureSlot> = {}): MarketFurnitureSlot {
   return {
     id: 1,
-    shelf_id: 1,
+    furniture_id: 1,
     format_key: 'postcard',
     design_id: 1,
     quantity: 10,

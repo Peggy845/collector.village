@@ -1,5 +1,5 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
-import type { FactoryDesign, FactoryInventoryItem, FactoryProductionBatch, MarketShelfSlot } from '@/types/database';
+import type { FactoryDesign, FactoryInventoryItem, FactoryProductionBatch, MarketFurnitureSlot } from '@/types/database';
 import { computeSlotRemaining } from '@/lib/market/catalog';
 
 // 管理員全站圖庫（user_id為null）＋自己在設計坊畫的（user_id等於自己）都要看得到，
@@ -76,16 +76,16 @@ export async function fetchDesignIdsStillInUse(
     .in('design_id', designIds);
   for (const row of inventory ?? []) inUse.add(row.design_id);
 
-  const { data: shelves } = await supabase.from('market_shelves').select('id').eq('user_id', userId);
-  const shelfIds = (shelves ?? []).map((s) => s.id);
-  if (shelfIds.length > 0) {
+  const { data: furniture } = await supabase.from('market_furniture').select('id').eq('user_id', userId);
+  const furnitureIds = (furniture ?? []).map((f) => f.id);
+  if (furnitureIds.length > 0) {
     const { data: slots } = await supabase
-      .from('market_shelf_slots')
+      .from('market_furniture_slots')
       .select('*')
-      .in('shelf_id', shelfIds)
+      .in('furniture_id', furnitureIds)
       .in('design_id', designIds);
     const now = Date.now();
-    for (const row of (slots ?? []) as MarketShelfSlot[]) {
+    for (const row of (slots ?? []) as MarketFurnitureSlot[]) {
       if (computeSlotRemaining(row, now) > 0) inUse.add(row.design_id);
     }
   }

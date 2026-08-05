@@ -15,6 +15,8 @@ export type FormatKey =
   | 'acrylic_charm';
 export type ProductionBatchStatus = 'in_progress' | 'collected';
 export type PlayerDesignStatus = 'library' | 'temp';
+export type FurnitureType = 'bookshelf' | 'pegboard' | 'stacking_bin' | 'cashier';
+export type Facing = 'up' | 'down';
 
 export interface Ip {
   id: number;
@@ -183,16 +185,20 @@ export interface FactoryInventoryItem {
   updated_at: string;
 }
 
-export interface MarketShelf {
+export interface MarketFurniture {
   id: number;
   user_id: string;
-  capacity: number;
+  furniture_type: FurnitureType;
+  capacity: number | null;
+  grid_x: number;
+  grid_y: number;
+  facing: Facing;
   created_at: string;
 }
 
-export interface MarketShelfSlot {
+export interface MarketFurnitureSlot {
   id: number;
-  shelf_id: number;
+  furniture_id: number;
   format_key: FormatKey;
   design_id: number;
   quantity: number;

@@ -1,32 +1,32 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
-import type { MarketShelf, MarketShelfSlot } from '@/types/database';
+import type { MarketFurniture, MarketFurnitureSlot } from '@/types/database';
 
-export async function fetchShelves(supabase: SupabaseClient, userId: string): Promise<MarketShelf[]> {
+export async function fetchFurniture(supabase: SupabaseClient, userId: string): Promise<MarketFurniture[]> {
   const { data, error } = await supabase
-    .from('market_shelves')
+    .from('market_furniture')
     .select('*')
     .eq('user_id', userId)
     .order('created_at', { ascending: true });
   if (error) throw error;
-  return (data ?? []) as MarketShelf[];
+  return (data ?? []) as MarketFurniture[];
 }
 
-export async function fetchShelfSlots(supabase: SupabaseClient, userId: string): Promise<MarketShelfSlot[]> {
-  // market_shelf_slots 沒有直接存 user_id（見 schema.sql 註解），先查自己有哪些貨架，
-  // RLS select 政策也是用同樣的方式（透過 market_shelves.user_id）判斷擁有權。
-  const shelves = await fetchShelves(supabase, userId);
-  if (shelves.length === 0) return [];
+export async function fetchFurnitureSlots(supabase: SupabaseClient, userId: string): Promise<MarketFurnitureSlot[]> {
+  // market_furniture_slots 沒有直接存 user_id（見 schema.sql 註解），先查自己有哪些家具，
+  // RLS select 政策也是用同樣的方式（透過 market_furniture.user_id）判斷擁有權。
+  const furniture = await fetchFurniture(supabase, userId);
+  if (furniture.length === 0) return [];
 
   const { data, error } = await supabase
-    .from('market_shelf_slots')
+    .from('market_furniture_slots')
     .select('*')
     .in(
-      'shelf_id',
-      shelves.map((s) => s.id)
+      'furniture_id',
+      furniture.map((f) => f.id)
     )
     .order('listed_at', { ascending: true });
   if (error) throw error;
-  return (data ?? []) as MarketShelfSlot[];
+  return (data ?? []) as MarketFurnitureSlot[];
 }
 
 export async function fetchWarehouseCapacity(supabase: SupabaseClient, userId: string): Promise<number> {

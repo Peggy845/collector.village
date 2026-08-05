@@ -75,6 +75,10 @@ class FakeBuilder implements PromiseLike<{ data: unknown; error: null }> {
     this.filters.push((r) => (r[col] as string) >= (val as string));
     return this;
   }
+  lte(col: string, val: unknown) {
+    this.filters.push((r) => (r[col] as string) <= (val as string));
+    return this;
+  }
   in(col: string, vals: unknown[]) {
     this.filters.push((r) => vals.includes(r[col]));
     return this;

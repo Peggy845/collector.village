@@ -14,12 +14,12 @@ function mockAuthedUser(id = 'user-1') {
 }
 
 function postWith(body: unknown) {
-  return POST(new Request('http://localhost/api/market/list', { method: 'POST', body: JSON.stringify(body) }));
+  return POST(new Request('http://localhost/api/market/move-furniture', { method: 'POST', body: JSON.stringify(body) }));
 }
 
-const validBody = { furnitureId: 1, formatKey: 'postcard', designId: 1, quantity: 1 };
+const validBody = { furnitureId: 1, x: 6, y: 6, facing: 'down' };
 
-describe('POST /api/market/list', () => {
+describe('POST /api/market/move-furniture', () => {
   it('未登入回傳 401', async () => {
     vi.mocked(createClient).mockResolvedValue({
       auth: { getUser: async () => ({ data: { user: null } }) },
@@ -29,42 +29,26 @@ describe('POST /api/market/list', () => {
     expect(res.status).toBe(401);
   });
 
-  it('formatKey 不存在於商品目錄時回傳 400', async () => {
-    mockAuthedUser();
-    const res = await postWith({ ...validBody, formatKey: 'not-a-real-format' });
-    expect(res.status).toBe(400);
-    const body = await res.json();
-    expect(body.error).toBe('請求格式錯誤');
-  });
-
   it('furnitureId 缺漏時回傳 400', async () => {
     mockAuthedUser();
     const res = await postWith({ ...validBody, furnitureId: undefined });
     expect(res.status).toBe(400);
   });
 
-  it('designId 缺漏時回傳 400', async () => {
+  it('facing 不是 up/down 時回傳 400', async () => {
     mockAuthedUser();
-    const res = await postWith({ ...validBody, designId: undefined });
+    const res = await postWith({ ...validBody, facing: 'sideways' });
     expect(res.status).toBe(400);
   });
 
-  it('quantity 小於 1 時回傳 400', async () => {
+  it('找不到這個家具（不屬於自己或不存在）時回傳 400', async () => {
     mockAuthedUser();
-    const res = await postWith({ ...validBody, quantity: 0 });
-    expect(res.status).toBe(400);
-  });
-
-  it('家具種類不接受這個商品格式時回傳 400（2026-08-05 新增）', async () => {
-    mockAuthedUser();
-    // 目標家具是洞洞板（pegboard），只接受 badge/keychain/acrylic_stand/acrylic_charm，
-    // 這裡上架的是 postcard（印表機系列），應該被擋下來，不會走到容量/倉庫檢查。
     vi.mocked(createAdminClient).mockReturnValue({
       from: () => ({
         select: () => ({
           eq: () => ({
             eq: () => ({
-              maybeSingle: async () => ({ data: { id: 1, furniture_type: 'pegboard', capacity: 10 } }),
+              maybeSingle: async () => ({ data: null }),
             }),
           }),
         }),
@@ -74,6 +58,6 @@ describe('POST /api/market/list', () => {
     const res = await postWith(validBody);
     expect(res.status).toBe(400);
     const body = await res.json();
-    expect(body.error).toBe('這個家具沒辦法放這種商品格式');
+    expect(body.error).toBe('找不到這個家具');
   });
 });
