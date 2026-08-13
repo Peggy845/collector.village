@@ -1,4 +1,5 @@
 import type { Metadata } from 'next';
+import Link from 'next/link';
 import ClawMachine from '@/components/dream-room/ClawMachine';
 
 export const metadata: Metadata = {
@@ -20,6 +21,10 @@ export default function DreamRoomPage() {
       </header>
 
       <ClawMachine />
+
+      <p className="text-center text-xs text-neutral-400">
+        玩夠了嗎？<Link href="/dream-room/room" className="underline hover:text-neutral-600">試試把娃娃放進展示層架</Link>
+      </p>
     </main>
   );
 }

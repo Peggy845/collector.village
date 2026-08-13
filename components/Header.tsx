@@ -73,6 +73,9 @@ export default function Header() {
           <Link href="/dream-room" className="text-neutral-600 hover:text-neutral-900">
             夾娃娃機
           </Link>
+          <Link href="/dream-room/room" className="text-neutral-600 hover:text-neutral-900">
+            房間布置
+          </Link>
           {loggedIn && (
             <>
               <Link href="/dashboard" className="text-neutral-600 hover:text-neutral-900">
