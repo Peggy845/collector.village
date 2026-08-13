@@ -70,6 +70,9 @@ export default function Header() {
           <Link href="/browse" className="text-neutral-600 hover:text-neutral-900">
             收藏庫瀏覽
           </Link>
+          <Link href="/dream-room" className="text-neutral-600 hover:text-neutral-900">
+            夾娃娃機
+          </Link>
           {loggedIn && (
             <>
               <Link href="/dashboard" className="text-neutral-600 hover:text-neutral-900">
