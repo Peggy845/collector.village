@@ -1,6 +1,10 @@
 import type { RoomItem } from './roomItems';
 import type { FurnitureState, TierDef, TierState } from './furniture';
 
+// 這個檔案只處理書櫃（tiers由左到右排隊）的碰撞邏輯，堆疊箱的2D網格碰撞邏輯在
+// lib/dream-room/binPlacement.ts，兩種家具刻意不共用同一套判斷式。
+type BookshelfState = Extract<FurnitureState, { type: 'bookshelf' }>;
+
 // 房間布置的碰撞/貼合判斷，純函式、不碰React/DOM，比照 lib/market/placement.ts 的做法。
 // 核心設計：貼合狀態永遠是「用當下state即時算出來的」，不是放置當下算好存一個flag，
 // 這樣渲染永遠反映真實狀態，不會有算過一次沒同步更新的bug。
@@ -97,7 +101,7 @@ export function computeFitForPlacedItem(
 // insertAt省略時append到最後面（維持舊行為）；有給的話插入在該index，且會先把itemId原本在
 // 這一層的位置（如果有）拿掉再插入——這讓「同一層架內拖曳換位置」可以直接呼叫這個函式，
 // 不用另外呼叫removeItemFromTier分兩步做。
-export function placeItemOnTier(state: FurnitureState, tierIndex: number, itemId: string, insertAt?: number): FurnitureState {
+export function placeItemOnTier(state: BookshelfState, tierIndex: number, itemId: string, insertAt?: number): BookshelfState {
   return {
     ...state,
     tiers: state.tiers.map((tier) => {
@@ -111,7 +115,7 @@ export function placeItemOnTier(state: FurnitureState, tierIndex: number, itemId
   };
 }
 
-export function removeItemFromTier(state: FurnitureState, tierIndex: number, itemId: string): FurnitureState {
+export function removeItemFromTier(state: BookshelfState, tierIndex: number, itemId: string): BookshelfState {
   return {
     ...state,
     tiers: state.tiers.map((tier) =>
@@ -122,7 +126,7 @@ export function removeItemFromTier(state: FurnitureState, tierIndex: number, ite
   };
 }
 
-export function allPlacedItemIds(state: FurnitureState): Set<string> {
+export function allPlacedItemIds(state: BookshelfState): Set<string> {
   const ids = new Set<string>();
   for (const tier of state.tiers) {
     for (const id of tier.placedItemIds) ids.add(id);

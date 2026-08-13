@@ -4,9 +4,9 @@ import type { CSSProperties, PointerEvent as ReactPointerEvent } from 'react';
 import type { FurnitureState } from '@/lib/dream-room/furniture';
 import { ROOM_ITEMS_BY_ID } from '@/lib/dream-room/roomItems';
 import { computeFitForPlacedItem, computeTierFitForCandidate, type FitClass } from '@/lib/dream-room/placement';
+import { PX_PER_CM } from '@/lib/dream-room/scale';
 
-// 1cm換算成畫面上的px，讓層架/娃娃的相對大小有感，但不是真的標尺——沒有任何數字/刻度顯示給玩家。
-const PX_PER_CM = 5;
+type BookshelfState = Extract<FurnitureState, { type: 'bookshelf' }>;
 
 function tierGlowClass(fitClass: FitClass | null): string {
   if (fitClass === 'fits-with-room') {
@@ -26,7 +26,7 @@ export default function FurnitureZoom({
   onItemPointerDown,
   onBack,
 }: {
-  furnitureState: FurnitureState;
+  furnitureState: BookshelfState;
   dragItemId: string | null;
   hoverTierIndex: number | null;
   justPlacedId: string | null;

@@ -14,7 +14,7 @@ import type { RoomItem } from './roomItems';
 
 const TIER: TierDef = { index: 0, usableWidthCm: 50, clearanceHeightCm: 16 };
 
-const FURNITURE_DEF: FurnitureDef = {
+const FURNITURE_DEF: Extract<FurnitureDef, { type: 'bookshelf' }> = {
   id: 'test-shelf',
   type: 'bookshelf',
   label: '測試層架',
