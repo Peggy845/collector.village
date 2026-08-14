@@ -10,6 +10,7 @@ type BookshelfState = Extract<FurnitureState, { type: 'bookshelf' }>;
 // 這樣渲染永遠反映真實狀態，不會有算過一次沒同步更新的bug。
 export const SNUG_WIDTH_MARGIN_CM = 3;
 export const SNUG_HEIGHT_MARGIN_CM = 2;
+export const SNUG_DEPTH_MARGIN_CM = 2;
 // 視覺擠壓效果的上限，不管實際超出多少都封頂，避免畫面變形太誇張。
 export const MAX_SQUASH = 0.25;
 
@@ -20,9 +21,13 @@ export interface FitResult {
   class: FitClass;
   widthStatus: AxisStatus;
   heightStatus: AxisStatus;
+  // 深度是正面視角看不到的第三軸，沒有專屬的擠壓動畫（不像寬高會擠扁疊到鄰居），
+  // 但一樣會影響fitClass、也會反映在俯視縮圖（TopDownFootprint）上。
+  depthStatus: AxisStatus;
   // 0~MAX_SQUASH，只用來驅動視覺擠壓效果（擠扁/疊在鄰居上面），絕不顯示成文字/數字給玩家看。
   widthSquash: number;
   heightSquash: number;
+  depthSquash: number;
 }
 
 function sumWidths(ids: string[], itemsById: Record<string, RoomItem>): number {
@@ -33,11 +38,12 @@ function sumWidths(ids: string[], itemsById: Record<string, RoomItem>): number {
 export function computeFit(
   occupiedWidthCmAhead: number,
   tier: TierDef,
-  candidate: { realWidthCm: number; realHeightCm: number }
+  candidate: { realWidthCm: number; realHeightCm: number; realDepthCm: number }
 ): FitResult {
   const remainingWidth = tier.usableWidthCm - occupiedWidthCmAhead;
   const widthOverflow = candidate.realWidthCm - remainingWidth;
   const heightOverflow = candidate.realHeightCm - tier.clearanceHeightCm;
+  const depthOverflow = candidate.realDepthCm - tier.usableDepthCm;
 
   let widthStatus: AxisStatus;
   let widthSquash = 0;
@@ -61,14 +67,25 @@ export function computeFit(
     heightStatus = 'ok';
   }
 
+  let depthStatus: AxisStatus;
+  let depthSquash = 0;
+  if (depthOverflow > 0) {
+    depthStatus = 'overflow';
+    depthSquash = Math.min(MAX_SQUASH, depthOverflow / candidate.realDepthCm);
+  } else if (tier.usableDepthCm - candidate.realDepthCm < SNUG_DEPTH_MARGIN_CM) {
+    depthStatus = 'snug';
+  } else {
+    depthStatus = 'ok';
+  }
+
   const fitClass: FitClass =
-    widthStatus === 'overflow' || heightStatus === 'overflow'
+    widthStatus === 'overflow' || heightStatus === 'overflow' || depthStatus === 'overflow'
       ? 'force-overflow'
-      : widthStatus === 'snug' || heightStatus === 'snug'
+      : widthStatus === 'snug' || heightStatus === 'snug' || depthStatus === 'snug'
         ? 'snug-fit'
         : 'fits-with-room';
 
-  return { class: fitClass, widthStatus, heightStatus, widthSquash, heightSquash };
+  return { class: fitClass, widthStatus, heightStatus, depthStatus, widthSquash, heightSquash, depthSquash };
 }
 
 // 拿著一隻還沒放上去的娃娃，預覽放進這一層架的結果（append 在目前已放置項目的最後面）。
@@ -78,7 +95,7 @@ export function computeTierFitForCandidate(
   candidateItemId: string
 ): FitResult {
   const candidate = itemsById[candidateItemId];
-  if (!candidate) return computeFit(0, tier, { realWidthCm: 0, realHeightCm: 0 });
+  if (!candidate) return computeFit(0, tier, { realWidthCm: 0, realHeightCm: 0, realDepthCm: 0 });
   const occupiedWidthCmAhead = sumWidths(tier.placedItemIds, itemsById);
   return computeFit(occupiedWidthCmAhead, tier, candidate);
 }
@@ -92,7 +109,7 @@ export function computeFitForPlacedItem(
 ): FitResult {
   const itemId = tier.placedItemIds[indexInTier];
   const candidate = itemsById[itemId];
-  if (!candidate) return computeFit(0, tier, { realWidthCm: 0, realHeightCm: 0 });
+  if (!candidate) return computeFit(0, tier, { realWidthCm: 0, realHeightCm: 0, realDepthCm: 0 });
   const occupiedWidthCmAhead = sumWidths(tier.placedItemIds.slice(0, indexInTier), itemsById);
   return computeFit(occupiedWidthCmAhead, tier, candidate);
 }

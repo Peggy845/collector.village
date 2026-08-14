@@ -18,6 +18,7 @@ export interface BinFitResult {
   class: BinFitClass;
   outOfBounds: boolean;
   overlapsCount: number; // 跟幾個既有物件重疊，0代表沒有重疊
+  depthOverflow: boolean; // 箱子整體只有單一深度上限，跟欄列格數無關
 }
 
 // 物件的真實寬高換算成佔用幾欄幾列（無條件進位，寧可多佔一點也不要低估碰撞範圍）。
@@ -53,9 +54,10 @@ export function computeBinFit(
   excludeItemId?: string
 ): BinFitResult {
   const candidate = itemsById[candidateItemId];
-  if (!candidate) return { class: 'fits', outOfBounds: false, overlapsCount: 0 };
+  if (!candidate) return { class: 'fits', outOfBounds: false, overlapsCount: 0, depthOverflow: false };
   const span = computeItemSpan(bin, candidate);
   const outOfBounds = col < 0 || row < 0 || col + span.colSpan > bin.cols || row + span.rowSpan > bin.rows;
+  const depthOverflow = candidate.realDepthCm > bin.depthCm;
 
   const overlapsCount = existing.filter((placed) => {
     if (placed.itemId === candidateItemId || placed.itemId === excludeItemId) return false;
@@ -65,8 +67,8 @@ export function computeBinFit(
     return spansOverlap(col, row, span.colSpan, span.rowSpan, placed.col, placed.row, otherSpan.colSpan, otherSpan.rowSpan);
   }).length;
 
-  const fitClass: BinFitClass = outOfBounds || overlapsCount > 0 ? 'force-overflow' : 'fits';
-  return { class: fitClass, outOfBounds, overlapsCount };
+  const fitClass: BinFitClass = outOfBounds || overlapsCount > 0 || depthOverflow ? 'force-overflow' : 'fits';
+  return { class: fitClass, outOfBounds, overlapsCount, depthOverflow };
 }
 
 // 狀態轉換：永遠成功（硬塞不擋，只影響視覺），不改動傳入的物件，回傳新的state。

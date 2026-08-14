@@ -5,6 +5,7 @@ import type { FurnitureState } from '@/lib/dream-room/furniture';
 import { ROOM_ITEMS_BY_ID } from '@/lib/dream-room/roomItems';
 import { computeBinFit, computeItemSpan } from '@/lib/dream-room/binPlacement';
 import { PX_PER_CM } from '@/lib/dream-room/scale';
+import TopDownFootprint, { type FootprintItem } from '@/components/dream-room/TopDownFootprint';
 
 type BinState = Extract<FurnitureState, { type: 'stacking-bin' }>;
 
@@ -33,6 +34,25 @@ export default function BinZoom({
     dragItemId && hoverCell
       ? computeBinFit(bin, placedItems, ROOM_ITEMS_BY_ID, dragItemId, hoverCell.col, hoverCell.row, dragItemId)
       : null;
+
+  // 堆疊箱的深度是全箱共用單一上限（跟欄列格數無關），俯視縮圖依「欄」聚合——同一欄裡
+  // 不同高度疊放的東西，從正上方看下去只看得到最深的那個，所以每欄取最大深度代表這一欄。
+  const columnDepthCm = new Map<number, { depthCm: number; overflow: boolean }>();
+  for (const placed of placedItems) {
+    const item = ROOM_ITEMS_BY_ID[placed.itemId];
+    if (!item) continue;
+    const existing = columnDepthCm.get(placed.col);
+    if (!existing || item.realDepthCm > existing.depthCm) {
+      columnDepthCm.set(placed.col, { depthCm: item.realDepthCm, overflow: item.realDepthCm > bin.depthCm });
+    }
+  }
+  const footprintItems: FootprintItem[] = Array.from(columnDepthCm.entries()).map(([col, d]) => ({
+    id: `col-${col}`,
+    widthCm: bin.cellWidthCm,
+    depthCm: d.depthCm,
+    overflow: d.overflow,
+    xCm: col * bin.cellWidthCm,
+  }));
 
   return (
     <div className="absolute inset-0 flex flex-col items-center gap-4 overflow-y-auto p-4">
@@ -118,6 +138,8 @@ export default function BinZoom({
           })}
         </div>
       </div>
+
+      <TopDownFootprint boundaryWidthCm={bin.cols * bin.cellWidthCm} boundaryDepthCm={bin.depthCm} items={footprintItems} />
     </div>
   );
 }

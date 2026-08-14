@@ -17,9 +17,9 @@ function itemsById(items: RoomItem[]): Record<string, RoomItem> {
 
 describe('computePegFit', () => {
   const items = itemsById([
-    { id: 'a', image: '', realWidthCm: 6, realHeightCm: 9 }, // 窄+矮，掛哪都沒問題
-    { id: 'wide', image: '', realWidthCm: 12, realHeightCm: 9 }, // 比pegSpacingCmX(9)寬
-    { id: 'tall-mid-row', image: '', realWidthCm: 6, realHeightCm: 14 }, // 比中間排的pegSpacingCmY(11)高，但比最後一排的15矮
+    { id: 'a', image: '', realWidthCm: 6, realHeightCm: 9, realDepthCm: 5 }, // 窄+矮，掛哪都沒問題
+    { id: 'wide', image: '', realWidthCm: 12, realHeightCm: 9, realDepthCm: 5 }, // 比pegSpacingCmX(9)寬
+    { id: 'tall-mid-row', image: '', realWidthCm: 6, realHeightCm: 14, realDepthCm: 5 }, // 比中間排的pegSpacingCmY(11)高，但比最後一排的15矮
   ]);
 
   it('空板子掛物件，沒超出範圍、沒衝突、寬高沒超配額 -> fits', () => {

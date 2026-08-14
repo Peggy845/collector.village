@@ -5,6 +5,7 @@ import type { FurnitureState } from '@/lib/dream-room/furniture';
 import { ROOM_ITEMS_BY_ID } from '@/lib/dream-room/roomItems';
 import { computeFitForPlacedItem, computeTierFitForCandidate, type FitClass } from '@/lib/dream-room/placement';
 import { PX_PER_CM } from '@/lib/dream-room/scale';
+import TopDownFootprint from '@/components/dream-room/TopDownFootprint';
 
 type BookshelfState = Extract<FurnitureState, { type: 'bookshelf' }>;
 
@@ -49,8 +50,17 @@ export default function FurnitureZoom({
           const candidateFit = isHoverTarget ? computeTierFitForCandidate(tier, ROOM_ITEMS_BY_ID, dragItemId!) : null;
           const trackWidthPx = tier.usableWidthCm * PX_PER_CM;
 
+          const footprintItems = tier.placedItemIds
+            .map((itemId, indexInTier) => {
+              const item = ROOM_ITEMS_BY_ID[itemId];
+              if (!item) return null;
+              const fit = computeFitForPlacedItem(tier, ROOM_ITEMS_BY_ID, indexInTier);
+              return { id: itemId, widthCm: item.realWidthCm, depthCm: item.realDepthCm, overflow: fit.depthStatus === 'overflow' };
+            })
+            .filter((x): x is { id: string; widthCm: number; depthCm: number; overflow: boolean } => x !== null);
+
           return (
-            <div key={tier.index} className="flex justify-center">
+            <div key={tier.index} className="flex flex-col items-center gap-1.5">
               <div
                 data-tier-index={tier.index}
                 className={`relative flex items-end gap-1 overflow-visible rounded-lg border-2 border-[#B08A63] bg-[#EFE3D6] px-2 transition-all duration-200 ${
@@ -65,8 +75,12 @@ export default function FurnitureZoom({
                   const isSquashed = fit.class === 'force-overflow';
                   const isBeingDragged = itemId === dragItemId;
 
-                  const scaleX = fit.widthStatus === 'overflow' ? 1 - fit.widthSquash : 1 + fit.heightSquash * 0.4;
-                  const scaleY = fit.heightStatus === 'overflow' ? 1 - fit.heightSquash : 1 + fit.widthSquash * 0.4;
+                  // 深度在正面視角沒有專屬的軸可以擠，超出時對兩軸都套一點統一的收縮，
+                  // 讓「太厚塞不下」跟「太寬/太高塞不下」在正面視角至少有點視覺區別可循，
+                  // 主要的深度回饋還是靠下面的俯視縮圖（TopDownFootprint）。
+                  const depthFactor = fit.depthStatus === 'overflow' ? 1 - fit.depthSquash * 0.6 : 1;
+                  const scaleX = (fit.widthStatus === 'overflow' ? 1 - fit.widthSquash : 1 + fit.heightSquash * 0.4) * depthFactor;
+                  const scaleY = (fit.heightStatus === 'overflow' ? 1 - fit.heightSquash : 1 + fit.widthSquash * 0.4) * depthFactor;
                   const style: CSSProperties = {
                     width: item.realWidthCm * PX_PER_CM,
                     height: item.realHeightCm * PX_PER_CM,
@@ -96,6 +110,7 @@ export default function FurnitureZoom({
                   );
                 })}
               </div>
+              <TopDownFootprint boundaryWidthCm={tier.usableWidthCm} boundaryDepthCm={tier.usableDepthCm} items={footprintItems} />
             </div>
           );
         })}

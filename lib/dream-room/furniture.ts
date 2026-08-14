@@ -4,6 +4,7 @@ export interface TierDef {
   index: number;
   usableWidthCm: number;
   clearanceHeightCm: number;
+  usableDepthCm: number; // 層架前後可用深度，決定娃娃的厚度塞不塞得下
 }
 
 // 家具「定義」（不可變、純尺寸）跟「狀態」（含目前放了什麼）分開，避免用同一個module-level
@@ -20,6 +21,7 @@ export interface BinDef {
   rows: number;
   cellWidthCm: number;
   cellHeightCm: number;
+  depthCm: number; // 箱子整體的前後深度，跟欄列格數無關，是全箱共用的單一深度上限
 }
 
 export interface PlacedBinItem {
@@ -32,6 +34,8 @@ export interface PlacedBinItem {
 // 「連續2D網格、物件依尺寸佔用多格」都不同——每根釘子只是一個點，一根釘子上放一個物件
 // （不是靠尺寸換算佔用範圍），物件用「掛」的方式垂掛在釘子下方。這是第三種、真正不同的
 // 碰撞模型：離散slot occupancy，不是空間換算。
+// 刻意不加深度欄位：東西是掛在牆面上、往外懸空，後面沒有「牆」會被厚度頂到，跟書櫃/堆疊箱
+// 那種「東西放進一個有限深度的凹槽」性質不同，深度在這個家具沒有自然的碰撞意義。
 export interface PegDef {
   cols: number;
   rows: number;
@@ -58,14 +62,15 @@ export type FurnitureState =
 
 // 這兩個常數刻意標注成各自具體的分支型別（不是整個FurnitureDef聯合型別），這樣
 // createInitialFurnitureState的多載才能正確依照傳入的是哪一種家具、推導出對應的state型別。
+// usableDepthCm、bin.depthCm都還是草案數字，等Peggy量完實體家具深度再校正。
 export const BOOKSHELF: Extract<FurnitureDef, { type: 'bookshelf' }> = {
   id: 'bookshelf-1',
   type: 'bookshelf',
   label: '展示層架',
   tiers: [
-    { index: 0, usableWidthCm: 50, clearanceHeightCm: 16 },
-    { index: 1, usableWidthCm: 60, clearanceHeightCm: 20 },
-    { index: 2, usableWidthCm: 55, clearanceHeightCm: 26 },
+    { index: 0, usableWidthCm: 50, clearanceHeightCm: 16, usableDepthCm: 15 },
+    { index: 1, usableWidthCm: 60, clearanceHeightCm: 20, usableDepthCm: 18 },
+    { index: 2, usableWidthCm: 55, clearanceHeightCm: 26, usableDepthCm: 20 },
   ],
 };
 
@@ -73,7 +78,7 @@ export const STACKING_BIN: Extract<FurnitureDef, { type: 'stacking-bin' }> = {
   id: 'stacking-bin-1',
   type: 'stacking-bin',
   label: '透明堆疊箱',
-  bin: { cols: 4, rows: 3, cellWidthCm: 12, cellHeightCm: 12 },
+  bin: { cols: 4, rows: 3, cellWidthCm: 12, cellHeightCm: 12, depthCm: 15 },
 };
 
 export const PEGBOARD: Extract<FurnitureDef, { type: 'pegboard' }> = {

@@ -9,7 +9,7 @@ import {
 import type { BinDef, FurnitureState } from './furniture';
 import type { RoomItem } from './roomItems';
 
-const BIN: BinDef = { cols: 4, rows: 3, cellWidthCm: 12, cellHeightCm: 12 };
+const BIN: BinDef = { cols: 4, rows: 3, cellWidthCm: 12, cellHeightCm: 12, depthCm: 15 };
 type BinState = Extract<FurnitureState, { type: 'stacking-bin' }>;
 
 function itemsById(items: RoomItem[]): Record<string, RoomItem> {
@@ -27,8 +27,9 @@ describe('computeItemSpan', () => {
 
 describe('computeBinFit', () => {
   const items = itemsById([
-    { id: 'a', image: '', realWidthCm: 10, realHeightCm: 10 }, // 1x1
-    { id: 'b', image: '', realWidthCm: 20, realHeightCm: 10 }, // 2x1
+    { id: 'a', image: '', realWidthCm: 10, realHeightCm: 10, realDepthCm: 10 }, // 1x1
+    { id: 'b', image: '', realWidthCm: 20, realHeightCm: 10, realDepthCm: 10 }, // 2x1
+    { id: 'deep', image: '', realWidthCm: 10, realHeightCm: 10, realDepthCm: 20 }, // 太深，箱子只有15cm深
   ]);
 
   it('空箱子放物件，範圍內且沒有重疊 -> fits', () => {
@@ -36,6 +37,14 @@ describe('computeBinFit', () => {
     expect(result.class).toBe('fits');
     expect(result.outOfBounds).toBe(false);
     expect(result.overlapsCount).toBe(0);
+    expect(result.depthOverflow).toBe(false);
+  });
+
+  it('厚度超過箱子整體深度上限 -> force-overflow，depthOverflow為true（跟欄列位置無關）', () => {
+    const result = computeBinFit(BIN, [], items, 'deep', 0, 0);
+    expect(result.class).toBe('force-overflow');
+    expect(result.depthOverflow).toBe(true);
+    expect(result.outOfBounds).toBe(false);
   });
 
   it('超出箱子邊界 -> force-overflow，outOfBounds為true', () => {
