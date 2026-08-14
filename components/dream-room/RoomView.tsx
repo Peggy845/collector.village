@@ -41,6 +41,21 @@ function BinThumb({ state }: { state: Extract<FurnitureState, { type: 'stacking-
   );
 }
 
+function PegboardThumb({ state }: { state: Extract<FurnitureState, { type: 'pegboard' }> }) {
+  return (
+    <div className="flex h-[92px] w-[120px] flex-wrap content-start gap-1.5 rounded-md border-2 border-[#C9A27B] bg-[#EFE3D6]/70 p-2 shadow-[0_10px_20px_rgba(90,74,66,0.2)]">
+      {state.placedItems.slice(0, 8).map((placed) => {
+        const item = ROOM_ITEMS_BY_ID[placed.itemId];
+        if (!item) return null;
+        return (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img key={placed.itemId} src={item.image} alt="" className="h-6 w-6 object-contain" draggable={false} />
+        );
+      })}
+    </div>
+  );
+}
+
 export default function RoomView({
   furnitureStates,
   onSelectFurniture,
@@ -63,7 +78,13 @@ export default function RoomView({
           title="點一下佈置這個家具"
           className="transition-transform hover:scale-[1.03] active:scale-95"
         >
-          {state.type === 'bookshelf' ? <BookshelfThumb state={state} /> : <BinThumb state={state} />}
+          {state.type === 'bookshelf' ? (
+            <BookshelfThumb state={state} />
+          ) : state.type === 'stacking-bin' ? (
+            <BinThumb state={state} />
+          ) : (
+            <PegboardThumb state={state} />
+          )}
         </button>
       ))}
     </div>

@@ -6,22 +6,36 @@ import {
   createInitialFurnitureState,
   type FurnitureState,
 } from '@/lib/dream-room/furniture';
-import { allPlacedItemIds, placeItemOnTier, removeItemFromTier } from '@/lib/dream-room/placement';
-import { allBinPlacedItemIds, placeItemInBin, removeItemFromBin } from '@/lib/dream-room/binPlacement';
+import { placeItemOnTier, removeItemFromTier } from '@/lib/dream-room/placement';
+import { placeItemInBin, removeItemFromBin } from '@/lib/dream-room/binPlacement';
+import { placeItemOnPeg, removeItemFromPeg } from '@/lib/dream-room/pegPlacement';
 import { ROOM_ITEMS_BY_ID } from '@/lib/dream-room/roomItems';
 import RoomView from '@/components/dream-room/RoomView';
 import FurnitureZoom from '@/components/dream-room/FurnitureZoom';
 import BinZoom from '@/components/dream-room/BinZoom';
+import PegZoom from '@/components/dream-room/PegZoom';
 import ItemTray from '@/components/dream-room/ItemTray';
 
 type BookshelfState = Extract<FurnitureState, { type: 'bookshelf' }>;
 type BinState = Extract<FurnitureState, { type: 'stacking-bin' }>;
+type PegboardState = Extract<FurnitureState, { type: 'pegboard' }>;
 
 type ZoomState = { level: 'room' } | { level: 'furniture'; furnitureId: string };
-type DragOrigin = { type: 'tray' } | { type: 'tier'; tierIndex: number } | { type: 'bin' };
+type DragOrigin = { type: 'tray' } | { type: 'tier'; tierIndex: number } | { type: 'bin' } | { type: 'peg' };
 
 function initialFurnitureStates(): Record<string, FurnitureState> {
   return Object.fromEntries(ROOM_FURNITURE.map((def) => [def.id, createInitialFurnitureState(def)]));
+}
+
+// 釘子是離散的點，落點用「最接近哪一根釘子」四捨五入決定，跟堆疊箱的cell用Math.floor（連續格子）不同。
+function pegCellFromPoint(pegEl: HTMLElement, clientX: number, clientY: number): { col: number; row: number } {
+  const r = pegEl.getBoundingClientRect();
+  const spacingXPx = Number(pegEl.dataset.spacingXPx);
+  const spacingYPx = Number(pegEl.dataset.spacingYPx);
+  return {
+    col: Math.round((clientX - r.left - spacingXPx / 2) / spacingXPx),
+    row: Math.round((clientY - r.top - spacingYPx / 2) / spacingYPx),
+  };
 }
 
 // 放置/移動/移除統一成同一個手勢：從收藏匣或家具上「按住拖曳」，放開時偵測手指/滑鼠底下是
@@ -38,7 +52,8 @@ export default function RoomDecorator() {
     y: number;
     hoverTierIndex: number | null;
     hoverBinCell: { col: number; row: number } | null;
-  }>({ x: 0, y: 0, hoverTierIndex: null, hoverBinCell: null });
+    hoverPegCell: { col: number; row: number } | null;
+  }>({ x: 0, y: 0, hoverTierIndex: null, hoverBinCell: null, hoverPegCell: null });
 
   const dragInfoRef = useRef(dragInfo);
   const zoomRef = useRef(zoom);
@@ -66,6 +81,7 @@ export default function RoomDecorator() {
       const el = document.elementFromPoint(e.clientX, e.clientY) as HTMLElement | null;
       const tierEl = el?.closest<HTMLElement>('[data-tier-index]');
       const binEl = el?.closest<HTMLElement>('[data-bin-grid]');
+      const pegEl = el?.closest<HTMLElement>('[data-peg-grid]');
       const hoverTierIndex = tierEl ? Number(tierEl.dataset.tierIndex) : null;
       let hoverBinCell: { col: number; row: number } | null = null;
       if (binEl) {
@@ -77,7 +93,11 @@ export default function RoomDecorator() {
           row: Math.floor((e.clientY - r.top) / cellHeightPx),
         };
       }
-      setDragPos({ x: e.clientX, y: e.clientY, hoverTierIndex, hoverBinCell });
+      let hoverPegCell: { col: number; row: number } | null = null;
+      if (pegEl) {
+        hoverPegCell = pegCellFromPoint(pegEl, e.clientX, e.clientY);
+      }
+      setDragPos({ x: e.clientX, y: e.clientY, hoverTierIndex, hoverBinCell, hoverPegCell });
     }
 
     function handleUp(e: PointerEvent) {
@@ -93,6 +113,7 @@ export default function RoomDecorator() {
       const el = document.elementFromPoint(e.clientX, e.clientY) as HTMLElement | null;
       const tierEl = el?.closest<HTMLElement>('[data-tier-index]');
       const binEl = el?.closest<HTMLElement>('[data-bin-grid]');
+      const pegEl = el?.closest<HTMLElement>('[data-peg-grid]');
       const trayEl = el?.closest('[data-tray-zone]');
 
       if (tierEl) {
@@ -128,6 +149,15 @@ export default function RoomDecorator() {
           return { ...prev, [furnitureId]: next };
         });
         triggerSnap(current.itemId);
+      } else if (pegEl) {
+        const { col, row } = pegCellFromPoint(pegEl, e.clientX, e.clientY);
+
+        setFurnitureStates((prev) => {
+          const peg = prev[furnitureId] as PegboardState;
+          const next = placeItemOnPeg(peg, current.itemId, col, row);
+          return { ...prev, [furnitureId]: next };
+        });
+        triggerSnap(current.itemId);
       } else if (trayEl) {
         if (current.origin.type === 'tier') {
           const tierIndex = current.origin.tierIndex;
@@ -139,6 +169,11 @@ export default function RoomDecorator() {
           setFurnitureStates((prev) => {
             const bin = prev[furnitureId] as BinState;
             return { ...prev, [furnitureId]: removeItemFromBin(bin, current.itemId) };
+          });
+        } else if (current.origin.type === 'peg') {
+          setFurnitureStates((prev) => {
+            const peg = prev[furnitureId] as PegboardState;
+            return { ...prev, [furnitureId]: removeItemFromPeg(peg, current.itemId) };
           });
         }
       }
@@ -162,7 +197,7 @@ export default function RoomDecorator() {
 
   function handleDragStart(itemId: string, origin: DragOrigin, clientX: number, clientY: number) {
     setDragInfo({ itemId, origin });
-    setDragPos({ x: clientX, y: clientY, hoverTierIndex: null, hoverBinCell: null });
+    setDragPos({ x: clientX, y: clientY, hoverTierIndex: null, hoverBinCell: null, hoverPegCell: null });
   }
 
   function handleBack() {
@@ -173,12 +208,6 @@ export default function RoomDecorator() {
   const isFurnitureZoomed = zoom.level === 'furniture';
   const zoomedFurniture = isFurnitureZoomed ? furnitureStates[zoom.furnitureId] : null;
   const dragImage = dragInfo ? ROOM_ITEMS_BY_ID[dragInfo.itemId] : null;
-
-  const placedIds = new Set<string>();
-  for (const state of Object.values(furnitureStates)) {
-    const ids = state.type === 'bookshelf' ? allPlacedItemIds(state) : allBinPlacedItemIds(state);
-    for (const id of ids) placedIds.add(id);
-  }
 
   return (
     <div className="mx-auto w-full max-w-2xl">
@@ -221,13 +250,22 @@ export default function RoomDecorator() {
                 onBack={handleBack}
               />
             )}
+            {zoomedFurniture?.type === 'pegboard' && (
+              <PegZoom
+                furnitureState={zoomedFurniture}
+                dragItemId={dragInfo?.itemId ?? null}
+                hoverCell={dragInfo ? dragPos.hoverPegCell : null}
+                justPlacedId={justPlacedId}
+                onItemPointerDown={(itemId, e) => handleDragStart(itemId, { type: 'peg' }, e.clientX, e.clientY)}
+                onBack={handleBack}
+              />
+            )}
           </div>
         </div>
 
         {isFurnitureZoomed && (
           <ItemTray
             draggingItemId={dragInfo?.itemId ?? null}
-            placedIds={placedIds}
             onItemPointerDown={(itemId, e) => handleDragStart(itemId, { type: 'tray' }, e.clientX, e.clientY)}
           />
         )}
