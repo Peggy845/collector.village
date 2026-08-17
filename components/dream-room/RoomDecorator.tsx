@@ -132,7 +132,12 @@ export default function RoomDecorator() {
 
         setFurnitureStates((prev) => {
           const bookshelf = prev[furnitureId] as BookshelfState;
-          const next = placeItemOnTier(bookshelf, targetTierIndex, current.itemId, insertIndex);
+          let next = placeItemOnTier(bookshelf, targetTierIndex, current.itemId, insertIndex);
+          // 從這件家具的層架A拖到層架B是「搬移」，要把A那份拿掉；只有從收藏匣拖進來才是
+          // 「新增一份」（呼應無限制擺放：同一隻娃娃可以出現在不同家具，但同一件家具內搬移不該變複製）。
+          if (current.origin.type === 'tier' && current.origin.tierIndex !== targetTierIndex) {
+            next = removeItemFromTier(next, current.origin.tierIndex, current.itemId);
+          }
           return { ...prev, [furnitureId]: next };
         });
         triggerSnap(current.itemId);
