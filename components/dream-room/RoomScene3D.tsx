@@ -1,11 +1,14 @@
 'use client';
 
-// 真3D技術驗證的第三階段：書櫃（單一軸向排隊）之外，加上透明堆疊箱（2D網格、AABB碰撞）
-// 驗證「真的不一樣的碰撞模型」在真3D下也撐得住，不是只有書櫃這一種簡單case才work。
-// 兩件家具同時放在同一個場景裡，共用同一個收藏匣，可以互相跨家具擺放。只有從收藏匣
-// 拖進畫面才會新增一份，畫面內移動（不管同一件家具內換層架/格子、還是跨家具搬）一律
-// 只是搬移，來源那份要正確移除，不能變複製（2026-08-18 Peggy 實測抓到才確認這條規則）。
-// 仍然是獨立的驗證頁面，沒有接進正式的/dream-room/room（那邊還是CSS正視圖版本）。
+// 房間布置的真3D場景：書櫃（單一軸向排隊）+ 透明堆疊箱（2D網格、AABB碰撞）兩件家具
+// 同時放在同一個場景裡、自由視角鏡頭，取代原本的CSS正視圖版本（2026-08-18正式接上
+// /dream-room/room）。洞洞板（離散釘點碰撞模型）還沒做3D版，暫時保留在舊版CSS入口
+// （見 PegboardDecoratorLegacy.tsx），不在這個場景裡。
+// 源頭是 components/dream-room/3d-test 驗證頁的技術驗證（獨立打磨過拖曳手勢、碰撞模型），
+// 那個頁面仍然保留著，之後要驗證新東西（例如洞洞板3D化）可以先在那邊試。
+// 共用同一個收藏匣，可以互相跨家具擺放。只有從收藏匣拖進畫面才會新增一份，畫面內移動
+// （不管同一件家具內換層架/格子、還是跨家具搬）一律只是搬移，來源那份要正確移除，
+// 不能變複製（2026-08-18 Peggy 實測抓到才確認這條規則）。
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Canvas, type ThreeEvent, useThree } from '@react-three/fiber';
 import { OrbitControls, useTexture } from '@react-three/drei';
@@ -411,7 +414,7 @@ function BinHoverPreview({
 type DragOrigin = { type: 'tray' } | { type: 'tier'; tierIndex: number } | { type: 'bin' };
 type DragInfo = { itemId: string; placementId: string; origin: DragOrigin };
 
-export default function ThreeDShelfSpike() {
+export default function RoomScene3D() {
   const [furnitureState, setFurnitureState] = useState<BookshelfState>(() => createInitialFurnitureState(BOOKSHELF));
   const [binState, setBinState] = useState<BinState>(() => createInitialFurnitureState(STACKING_BIN));
   const [dragInfo, setDragInfo] = useState<DragInfo | null>(null);
