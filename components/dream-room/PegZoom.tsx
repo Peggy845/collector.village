@@ -11,6 +11,7 @@ type PegboardState = Extract<FurnitureState, { type: 'pegboard' }>;
 export default function PegZoom({
   furnitureState,
   dragItemId,
+  dragPlacementId,
   hoverCell,
   justPlacedId,
   onItemPointerDown,
@@ -18,9 +19,10 @@ export default function PegZoom({
 }: {
   furnitureState: PegboardState;
   dragItemId: string | null;
+  dragPlacementId: string | null;
   hoverCell: { col: number; row: number } | null;
   justPlacedId: string | null;
-  onItemPointerDown: (itemId: string, e: ReactPointerEvent) => void;
+  onItemPointerDown: (itemId: string, placementId: string, e: ReactPointerEvent) => void;
   onBack: () => void;
 }) {
   const { peg, placedItems } = furnitureState;
@@ -32,7 +34,7 @@ export default function PegZoom({
   const dragCandidate = dragItemId ? ROOM_ITEMS_BY_ID[dragItemId] : null;
   const hoverFit =
     dragItemId && hoverCell
-      ? computePegFit(peg, placedItems, ROOM_ITEMS_BY_ID, dragItemId, hoverCell.col, hoverCell.row, dragItemId)
+      ? computePegFit(peg, placedItems, ROOM_ITEMS_BY_ID, dragItemId, hoverCell.col, hoverCell.row, dragPlacementId ?? undefined)
       : null;
 
   return (
@@ -82,9 +84,9 @@ export default function PegZoom({
           {placedItems.map((placed) => {
             const item = ROOM_ITEMS_BY_ID[placed.itemId];
             if (!item) return null;
-            const fit = computePegFit(peg, placedItems, ROOM_ITEMS_BY_ID, placed.itemId, placed.col, placed.row, placed.itemId);
+            const fit = computePegFit(peg, placedItems, ROOM_ITEMS_BY_ID, placed.itemId, placed.col, placed.row, placed.placementId);
             const isSquashed = fit.class === 'force-overflow';
-            const isBeingDragged = placed.itemId === dragItemId;
+            const isBeingDragged = placed.placementId === dragPlacementId;
 
             const widthPx = item.realWidthCm * PX_PER_CM;
             const heightPx = item.realHeightCm * PX_PER_CM;
@@ -102,15 +104,16 @@ export default function PegZoom({
 
             return (
               <div
-                key={placed.itemId}
+                key={placed.placementId}
                 data-item-id={placed.itemId}
+                data-placement-id={placed.placementId}
                 onPointerDown={(e) => {
                   e.preventDefault();
-                  onItemPointerDown(placed.itemId, e);
+                  onItemPointerDown(placed.itemId, placed.placementId, e);
                 }}
                 title="按住拖曳可以換釘子、換家具，或移回收藏匣"
                 className={`touch-none transition-transform duration-500 ease-out ${
-                  placed.itemId === justPlacedId ? 'dreamroom-snap' : ''
+                  placed.placementId === justPlacedId ? 'dreamroom-snap' : ''
                 } ${isSquashed ? 'drop-shadow-[0_2px_6px_rgba(90,74,66,0.5)]' : 'drop-shadow-[0_2px_4px_rgba(90,74,66,0.3)]'}`}
                 style={style}
               >

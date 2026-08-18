@@ -109,12 +109,15 @@ describe('computeTierFitForCandidate', () => {
       { id: 'b', image: '', realWidthCm: 15, realHeightCm: 5, realDepthCm: 5 },
       { id: 'c', image: '', realWidthCm: 20, realHeightCm: 5, realDepthCm: 5 },
     ]);
-    const tier: TierState = { ...TIER, placedItemIds: ['a', 'b'] };
+    const tier: TierState = { ...TIER, placedItems: [{ placementId: 'p-a', itemId: 'a' }, { placementId: 'p-b', itemId: 'b' }] };
     // 已佔用 10+15=25，剩餘 25，放寬度20的c，剩餘25-20=5 >= 3 -> fits-with-room
     const fitsResult = computeTierFitForCandidate(tier, items, 'c');
     expect(fitsResult.class).toBe('fits-with-room');
 
-    const tierAlmostFull: TierState = { ...TIER, placedItemIds: ['a', 'b', 'c'] };
+    const tierAlmostFull: TierState = {
+      ...TIER,
+      placedItems: [{ placementId: 'p-a', itemId: 'a' }, { placementId: 'p-b', itemId: 'b' }, { placementId: 'p-c', itemId: 'c' }],
+    };
     // 已佔用 10+15+20=45，剩餘5，再放一個寬度4的 -> 剩餘1 < 3 -> snug-fit
     const dItems = { ...items, d: { id: 'd', image: '', realWidthCm: 4, realHeightCm: 5, realDepthCm: 5 } };
     const snugResult = computeTierFitForCandidate(tierAlmostFull, dItems, 'd');
@@ -129,7 +132,10 @@ describe('computeFitForPlacedItem', () => {
       { id: 'b', image: '', realWidthCm: 15, realHeightCm: 5, realDepthCm: 5 },
       { id: 'c', image: '', realWidthCm: 20, realHeightCm: 5, realDepthCm: 5 },
     ]);
-    const tier: TierState = { ...TIER, placedItemIds: ['a', 'b', 'c'] };
+    const tier: TierState = {
+      ...TIER,
+      placedItems: [{ placementId: 'p-a', itemId: 'a' }, { placementId: 'p-b', itemId: 'b' }, { placementId: 'p-c', itemId: 'c' }],
+    };
     // c排第三個(index 2)，前面只有a+b=25，跟直接呼叫computeTierFitForCandidate('c')(佔用a+b)結果一致
     const result = computeFitForPlacedItem(tier, items, 2);
     expect(result.class).toBe('fits-with-room');
@@ -144,61 +150,73 @@ describe('computeFitForPlacedItem', () => {
 describe('placeItemOnTier / removeItemFromTier', () => {
   it('放置會依序append到層架尾端，且不會mutate傳入的state', () => {
     const original = createInitialFurnitureState(FURNITURE_DEF);
-    const afterA = placeItemOnTier(original, 0, 'a');
-    const afterB = placeItemOnTier(afterA, 0, 'b');
+    const afterA = placeItemOnTier(original, 0, 'p-a', 'a');
+    const afterB = placeItemOnTier(afterA, 0, 'p-b', 'b');
 
-    expect(afterB.tiers[0].placedItemIds).toEqual(['a', 'b']);
+    expect(afterB.tiers[0].placedItems).toEqual([{ placementId: 'p-a', itemId: 'a' }, { placementId: 'p-b', itemId: 'b' }]);
     // 傳入的state物件本身沒有被改動
-    expect(original.tiers[0].placedItemIds).toEqual([]);
-    expect(afterA.tiers[0].placedItemIds).toEqual(['a']);
+    expect(original.tiers[0].placedItems).toEqual([]);
+    expect(afterA.tiers[0].placedItems).toEqual([{ placementId: 'p-a', itemId: 'a' }]);
   });
 
   it('給insertAt時可以插入在指定位置，不是永遠append到最後面', () => {
     let state = createInitialFurnitureState(FURNITURE_DEF);
-    state = placeItemOnTier(state, 0, 'a');
-    state = placeItemOnTier(state, 0, 'c');
+    state = placeItemOnTier(state, 0, 'p-a', 'a');
+    state = placeItemOnTier(state, 0, 'p-c', 'c');
     // 把b插入在a跟c中間（index 1）
-    state = placeItemOnTier(state, 0, 'b', 1);
+    state = placeItemOnTier(state, 0, 'p-b', 'b', 1);
 
-    expect(state.tiers[0].placedItemIds).toEqual(['a', 'b', 'c']);
+    expect(state.tiers[0].placedItems.map((p) => p.itemId)).toEqual(['a', 'b', 'c']);
   });
 
   it('同一層架內對已放置的項目呼叫placeItemOnTier等於換位置（先移除原本位置再插入新位置）', () => {
     let state = createInitialFurnitureState(FURNITURE_DEF);
-    state = placeItemOnTier(state, 0, 'a');
-    state = placeItemOnTier(state, 0, 'b');
-    state = placeItemOnTier(state, 0, 'c');
-    // 把已經在最後面的c移到最前面
-    state = placeItemOnTier(state, 0, 'c', 0);
+    state = placeItemOnTier(state, 0, 'p-a', 'a');
+    state = placeItemOnTier(state, 0, 'p-b', 'b');
+    state = placeItemOnTier(state, 0, 'p-c', 'c');
+    // 把已經在最後面的c移到最前面（同一個placementId，插入時要先被移除舊位置，不能變兩份）
+    state = placeItemOnTier(state, 0, 'p-c', 'c', 0);
 
-    expect(state.tiers[0].placedItemIds).toEqual(['c', 'a', 'b']);
+    expect(state.tiers[0].placedItems.map((p) => p.itemId)).toEqual(['c', 'a', 'b']);
+    expect(state.tiers[0].placedItems).toHaveLength(3);
+  });
+
+  it('同一itemId可以有兩個不同的placementId同時存在同一層架，不會互相覆蓋', () => {
+    let state = createInitialFurnitureState(FURNITURE_DEF);
+    state = placeItemOnTier(state, 0, 'p-1', 'a');
+    state = placeItemOnTier(state, 0, 'p-2', 'a');
+
+    expect(state.tiers[0].placedItems).toEqual([
+      { placementId: 'p-1', itemId: 'a' },
+      { placementId: 'p-2', itemId: 'a' },
+    ]);
   });
 
   it('移除已放置的項目，保留剩餘項目原本的順序', () => {
     let state = createInitialFurnitureState(FURNITURE_DEF);
-    state = placeItemOnTier(state, 0, 'a');
-    state = placeItemOnTier(state, 0, 'b');
-    state = placeItemOnTier(state, 0, 'c');
+    state = placeItemOnTier(state, 0, 'p-a', 'a');
+    state = placeItemOnTier(state, 0, 'p-b', 'b');
+    state = placeItemOnTier(state, 0, 'p-c', 'c');
 
-    const afterRemove = removeItemFromTier(state, 0, 'b');
-    expect(afterRemove.tiers[0].placedItemIds).toEqual(['a', 'c']);
+    const afterRemove = removeItemFromTier(state, 0, 'p-b');
+    expect(afterRemove.tiers[0].placedItems.map((p) => p.itemId)).toEqual(['a', 'c']);
   });
 
-  it('移除不存在的id是no-op，內容不變', () => {
+  it('移除不存在的placementId是no-op，內容不變', () => {
     let state = createInitialFurnitureState(FURNITURE_DEF);
-    state = placeItemOnTier(state, 0, 'a');
+    state = placeItemOnTier(state, 0, 'p-a', 'a');
 
     const afterRemove = removeItemFromTier(state, 0, 'does-not-exist');
-    expect(afterRemove.tiers[0].placedItemIds).toEqual(['a']);
+    expect(afterRemove.tiers[0].placedItems).toEqual([{ placementId: 'p-a', itemId: 'a' }]);
   });
 });
 
 describe('allPlacedItemIds', () => {
   it('跨層架把所有已放置項目攤平成一個Set，不重複', () => {
     let state = createInitialFurnitureState(FURNITURE_DEF);
-    state = placeItemOnTier(state, 0, 'a');
-    state = placeItemOnTier(state, 0, 'b');
-    state = placeItemOnTier(state, 1, 'c');
+    state = placeItemOnTier(state, 0, 'p-a', 'a');
+    state = placeItemOnTier(state, 0, 'p-b', 'b');
+    state = placeItemOnTier(state, 1, 'p-c', 'c');
 
     const ids = allPlacedItemIds(state);
     expect(ids).toEqual(new Set(['a', 'b', 'c']));

@@ -1,5 +1,5 @@
 import type { RoomItem } from './roomItems';
-import type { FurnitureState, TierDef, TierState } from './furniture';
+import type { FurnitureState, PlacedTierItem, TierDef, TierState } from './furniture';
 
 // 這個檔案只處理書櫃（tiers由左到右排隊）的碰撞邏輯，堆疊箱的2D網格碰撞邏輯在
 // lib/dream-room/binPlacement.ts，兩種家具刻意不共用同一套判斷式。
@@ -30,8 +30,8 @@ export interface FitResult {
   depthSquash: number;
 }
 
-function sumWidths(ids: string[], itemsById: Record<string, RoomItem>): number {
-  return ids.reduce((sum, id) => sum + (itemsById[id]?.realWidthCm ?? 0), 0);
+function sumWidths(items: PlacedTierItem[], itemsById: Record<string, RoomItem>): number {
+  return items.reduce((sum, p) => sum + (itemsById[p.itemId]?.realWidthCm ?? 0), 0);
 }
 
 // 給定「這一層架前面已經佔用的寬度」跟候選物件的真實尺寸，算出貼合狀態。
@@ -96,7 +96,7 @@ export function computeTierFitForCandidate(
 ): FitResult {
   const candidate = itemsById[candidateItemId];
   if (!candidate) return computeFit(0, tier, { realWidthCm: 0, realHeightCm: 0, realDepthCm: 0 });
-  const occupiedWidthCmAhead = sumWidths(tier.placedItemIds, itemsById);
+  const occupiedWidthCmAhead = sumWidths(tier.placedItems, itemsById);
   return computeFit(occupiedWidthCmAhead, tier, candidate);
 }
 
@@ -107,37 +107,44 @@ export function computeFitForPlacedItem(
   itemsById: Record<string, RoomItem>,
   indexInTier: number
 ): FitResult {
-  const itemId = tier.placedItemIds[indexInTier];
-  const candidate = itemsById[itemId];
+  const itemId = tier.placedItems[indexInTier]?.itemId;
+  const candidate = itemId ? itemsById[itemId] : undefined;
   if (!candidate) return computeFit(0, tier, { realWidthCm: 0, realHeightCm: 0, realDepthCm: 0 });
-  const occupiedWidthCmAhead = sumWidths(tier.placedItemIds.slice(0, indexInTier), itemsById);
+  const occupiedWidthCmAhead = sumWidths(tier.placedItems.slice(0, indexInTier), itemsById);
   return computeFit(occupiedWidthCmAhead, tier, candidate);
 }
 
 // 狀態轉換：永遠成功（硬塞不擋，只影響視覺），不改動傳入的物件，回傳新的state。
-// insertAt省略時append到最後面（維持舊行為）；有給的話插入在該index，且會先把itemId原本在
-// 這一層的位置（如果有）拿掉再插入——這讓「同一層架內拖曳換位置」可以直接呼叫這個函式，
-// 不用另外呼叫removeItemFromTier分兩步做。
-export function placeItemOnTier(state: BookshelfState, tierIndex: number, itemId: string, insertAt?: number): BookshelfState {
+// insertAt省略時append到最後面（維持舊行為）；有給的話插入在該index，且會先把這個placementId
+// 原本在這一層的位置（如果有）拿掉再插入——這讓「同一層架內拖曳換位置」可以直接呼叫這個函式，
+// 不用另外呼叫removeItemFromTier分兩步做。用placementId（不是itemId）當識別，同一itemId
+// 才能在同一層架、甚至同一個場景的不同家具間，同時存在好幾份互不影響的「無限制擺放」。
+export function placeItemOnTier(
+  state: BookshelfState,
+  tierIndex: number,
+  placementId: string,
+  itemId: string,
+  insertAt?: number
+): BookshelfState {
   return {
     ...state,
     tiers: state.tiers.map((tier) => {
       if (tier.index !== tierIndex) return tier;
-      const withoutItem = tier.placedItemIds.filter((id) => id !== itemId);
+      const withoutItem = tier.placedItems.filter((p) => p.placementId !== placementId);
       const index = insertAt === undefined ? withoutItem.length : Math.max(0, Math.min(insertAt, withoutItem.length));
       const next = [...withoutItem];
-      next.splice(index, 0, itemId);
-      return { ...tier, placedItemIds: next };
+      next.splice(index, 0, { placementId, itemId });
+      return { ...tier, placedItems: next };
     }),
   };
 }
 
-export function removeItemFromTier(state: BookshelfState, tierIndex: number, itemId: string): BookshelfState {
+export function removeItemFromTier(state: BookshelfState, tierIndex: number, placementId: string): BookshelfState {
   return {
     ...state,
     tiers: state.tiers.map((tier) =>
       tier.index === tierIndex
-        ? { ...tier, placedItemIds: tier.placedItemIds.filter((id) => id !== itemId) }
+        ? { ...tier, placedItems: tier.placedItems.filter((p) => p.placementId !== placementId) }
         : tier
     ),
   };
@@ -146,7 +153,7 @@ export function removeItemFromTier(state: BookshelfState, tierIndex: number, ite
 export function allPlacedItemIds(state: BookshelfState): Set<string> {
   const ids = new Set<string>();
   for (const tier of state.tiers) {
-    for (const id of tier.placedItemIds) ids.add(id);
+    for (const p of tier.placedItems) ids.add(p.itemId);
   }
   return ids;
 }

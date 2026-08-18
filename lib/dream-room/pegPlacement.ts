@@ -24,7 +24,9 @@ function verticalClearanceCm(peg: PegDef, row: number): number {
 }
 
 // 候選物件掛在(col,row)這根釘子上，算出是否超出板子範圍、是否跟同一根釘子上既有物件衝突、
-// 寬高是否超出這根釘子的可用配額。excludeItemId用在「拖曳已經掛著的物件」時，不要跟自己算衝突。
+// 寬高是否超出這根釘子的可用配額。excludePlacementId用在「拖曳已經掛著的物件」時，不要跟
+// 自己算衝突——用placementId而不是itemId來排除自己，這樣同一itemId的第二份掛上去時
+// 才會正確跟第一份算衝突，不會因為itemId相同就被無條件放過。
 export function computePegFit(
   peg: PegDef,
   existing: PlacedPegItem[],
@@ -32,7 +34,7 @@ export function computePegFit(
   candidateItemId: string,
   col: number,
   row: number,
-  excludeItemId?: string
+  excludePlacementId?: string
 ): PegFitResult {
   const candidate = itemsById[candidateItemId];
   if (!candidate) {
@@ -43,11 +45,7 @@ export function computePegFit(
   const clampedRow = Math.max(0, Math.min(row, peg.rows - 1));
 
   const samePegOccupied = existing.some(
-    (placed) =>
-      placed.itemId !== candidateItemId &&
-      placed.itemId !== excludeItemId &&
-      placed.col === col &&
-      placed.row === row
+    (placed) => placed.placementId !== excludePlacementId && placed.col === col && placed.row === row
   );
 
   const widthOverflow = candidate.realWidthCm > peg.pegSpacingCmX;
@@ -61,16 +59,17 @@ export function computePegFit(
 
 // 狀態轉換：永遠成功（硬塞不擋，只影響視覺），不改動傳入的物件，回傳新的state。
 // 座標會夾在板子範圍內，允許跟其他物件掛在同一根釘子上——衝突與否只影響渲染時的
-// 視覺擠壓效果，不影響能不能掛。
-export function placeItemOnPeg(state: PegboardState, itemId: string, col: number, row: number): PegboardState {
+// 視覺擠壓效果，不影響能不能掛。用placementId（不是itemId）當識別，同一itemId才能
+// 在板子上、甚至同一個場景的不同家具間，同時存在好幾份互不影響的「無限制擺放」。
+export function placeItemOnPeg(state: PegboardState, placementId: string, itemId: string, col: number, row: number): PegboardState {
   const clampedCol = Math.max(0, Math.min(col, state.peg.cols - 1));
   const clampedRow = Math.max(0, Math.min(row, state.peg.rows - 1));
-  const withoutItem = state.placedItems.filter((p) => p.itemId !== itemId);
-  return { ...state, placedItems: [...withoutItem, { itemId, col: clampedCol, row: clampedRow }] };
+  const withoutItem = state.placedItems.filter((p) => p.placementId !== placementId);
+  return { ...state, placedItems: [...withoutItem, { placementId, itemId, col: clampedCol, row: clampedRow }] };
 }
 
-export function removeItemFromPeg(state: PegboardState, itemId: string): PegboardState {
-  return { ...state, placedItems: state.placedItems.filter((p) => p.itemId !== itemId) };
+export function removeItemFromPeg(state: PegboardState, placementId: string): PegboardState {
+  return { ...state, placedItems: state.placedItems.filter((p) => p.placementId !== placementId) };
 }
 
 export function allPegPlacedItemIds(state: PegboardState): Set<string> {

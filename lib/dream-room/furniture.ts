@@ -9,8 +9,13 @@ export interface TierDef {
 
 // 家具「定義」（不可變、純尺寸）跟「狀態」（含目前放了什麼）分開，避免用同一個module-level
 // 物件直接被放置邏輯改動，造成HMR/重新渲染時狀態外洩。
+export interface PlacedTierItem {
+  placementId: string; // 每次「從收藏匣拖進畫面」都是新的一份，用這個而不是itemId當唯一識別
+  itemId: string; // 娃娃種類，決定圖片/尺寸，同一itemId可以同時有多個placementId（無限制擺放）
+}
+
 export interface TierState extends TierDef {
-  placedItemIds: string[]; // 由左到右排列，順序可以拖曳調整
+  placedItems: PlacedTierItem[]; // 由左到右排列，順序可以拖曳調整
 }
 
 // 透明堆疊箱是一個2D網格（跟書櫃的「單一軸向、由左到右排隊」性質不同，兩個軸向都要考慮碰撞），
@@ -25,7 +30,8 @@ export interface BinDef {
 }
 
 export interface PlacedBinItem {
-  itemId: string;
+  placementId: string; // 每次「從收藏匣拖進畫面」都是新的一份，用這個而不是itemId當唯一識別
+  itemId: string; // 娃娃種類，決定圖片/尺寸，同一itemId可以同時有多個placementId（無限制擺放）
   col: number;
   row: number;
 }
@@ -45,7 +51,8 @@ export interface PegDef {
 }
 
 export interface PlacedPegItem {
-  itemId: string;
+  placementId: string; // 每次「從收藏匣拖進畫面」都是新的一份，用這個而不是itemId當唯一識別
+  itemId: string; // 娃娃種類，決定圖片/尺寸，同一itemId可以同時有多個placementId（無限制擺放）
   col: number;
   row: number;
 }
@@ -106,7 +113,7 @@ export function createInitialFurnitureState(def: FurnitureDef): FurnitureState {
     return {
       id: def.id,
       type: 'bookshelf',
-      tiers: def.tiers.map((tier) => ({ ...tier, placedItemIds: [] })),
+      tiers: def.tiers.map((tier) => ({ ...tier, placedItems: [] })),
     };
   }
   if (def.type === 'stacking-bin') {

@@ -36,17 +36,24 @@ describe('computePegFit', () => {
   });
 
   it('同一根釘子已經掛了別的物件 -> force-overflow，samePegOccupied為true', () => {
-    const existing = [{ itemId: 'a', col: 1, row: 1 }];
+    const existing = [{ placementId: 'p-a', itemId: 'a', col: 1, row: 1 }];
     const result = computePegFit(PEG, existing, items, 'wide', 1, 1);
     expect(result.class).toBe('force-overflow');
     expect(result.samePegOccupied).toBe(true);
   });
 
-  it('excludeItemId讓自己不會跟自己算衝突（拖曳已掛物件時用）', () => {
-    const existing = [{ itemId: 'a', col: 1, row: 1 }];
-    const result = computePegFit(PEG, existing, items, 'a', 1, 1, 'a');
+  it('excludePlacementId讓自己不會跟自己算衝突（拖曳已掛物件時用）', () => {
+    const existing = [{ placementId: 'p-a', itemId: 'a', col: 1, row: 1 }];
+    const result = computePegFit(PEG, existing, items, 'a', 1, 1, 'p-a');
     expect(result.class).toBe('fits');
     expect(result.samePegOccupied).toBe(false);
+  });
+
+  it('同一itemId的第二份不會被無條件排除，掛在同一根釘子上要正確判定衝突', () => {
+    const existing = [{ placementId: 'p-1', itemId: 'a', col: 1, row: 1 }];
+    const result = computePegFit(PEG, existing, items, 'a', 1, 1, 'p-2');
+    expect(result.class).toBe('force-overflow');
+    expect(result.samePegOccupied).toBe(true);
   });
 
   it('物件寬度超過pegSpacingCmX -> force-overflow，widthOverflow為true', () => {
@@ -73,35 +80,45 @@ describe('placeItemOnPeg / removeItemFromPeg', () => {
 
   it('掛上去後座標正確記錄，且座標會被夾在板子範圍內', () => {
     let state = def;
-    state = placeItemOnPeg(state, 'a', 1, 1);
-    expect(state.placedItems).toEqual([{ itemId: 'a', col: 1, row: 1 }]);
+    state = placeItemOnPeg(state, 'p-a', 'a', 1, 1);
+    expect(state.placedItems).toEqual([{ placementId: 'p-a', itemId: 'a', col: 1, row: 1 }]);
 
-    const overState = placeItemOnPeg(def, 'b', 99, -5);
-    expect(overState.placedItems[0]).toEqual({ itemId: 'b', col: PEG.cols - 1, row: 0 });
+    const overState = placeItemOnPeg(def, 'p-b', 'b', 99, -5);
+    expect(overState.placedItems[0]).toEqual({ placementId: 'p-b', itemId: 'b', col: PEG.cols - 1, row: 0 });
   });
 
-  it('再次呼叫placeItemOnPeg會移動同一個物件，不會重複出現兩次', () => {
+  it('再次對同一個placementId呼叫placeItemOnPeg會移動它，不會重複出現兩次', () => {
     let state = def;
-    state = placeItemOnPeg(state, 'a', 0, 0);
-    state = placeItemOnPeg(state, 'a', 3, 2);
-    expect(state.placedItems).toEqual([{ itemId: 'a', col: 3, row: 2 }]);
+    state = placeItemOnPeg(state, 'p-a', 'a', 0, 0);
+    state = placeItemOnPeg(state, 'p-a', 'a', 3, 2);
+    expect(state.placedItems).toEqual([{ placementId: 'p-a', itemId: 'a', col: 3, row: 2 }]);
   });
 
-  it('移除已掛的物件；移除不存在的id是no-op', () => {
+  it('同一itemId的兩個不同placementId可以同時掛著，不會互相覆蓋', () => {
     let state = def;
-    state = placeItemOnPeg(state, 'a', 0, 0);
-    state = placeItemOnPeg(state, 'b', 1, 0);
+    state = placeItemOnPeg(state, 'p-1', 'a', 0, 0);
+    state = placeItemOnPeg(state, 'p-2', 'a', 3, 2);
+    expect(state.placedItems).toEqual([
+      { placementId: 'p-1', itemId: 'a', col: 0, row: 0 },
+      { placementId: 'p-2', itemId: 'a', col: 3, row: 2 },
+    ]);
+  });
 
-    const afterRemove = removeItemFromPeg(state, 'a');
-    expect(afterRemove.placedItems).toEqual([{ itemId: 'b', col: 1, row: 0 }]);
+  it('移除已掛的物件；移除不存在的placementId是no-op', () => {
+    let state = def;
+    state = placeItemOnPeg(state, 'p-a', 'a', 0, 0);
+    state = placeItemOnPeg(state, 'p-b', 'b', 1, 0);
+
+    const afterRemove = removeItemFromPeg(state, 'p-a');
+    expect(afterRemove.placedItems).toEqual([{ placementId: 'p-b', itemId: 'b', col: 1, row: 0 }]);
 
     const afterNoop = removeItemFromPeg(afterRemove, 'does-not-exist');
-    expect(afterNoop.placedItems).toEqual([{ itemId: 'b', col: 1, row: 0 }]);
+    expect(afterNoop.placedItems).toEqual([{ placementId: 'p-b', itemId: 'b', col: 1, row: 0 }]);
   });
 
   it('不會mutate傳入的state', () => {
     const original = def;
-    placeItemOnPeg(original, 'a', 0, 0);
+    placeItemOnPeg(original, 'p-a', 'a', 0, 0);
     expect(original.placedItems).toEqual([]);
   });
 });
@@ -110,8 +127,8 @@ describe('allPegPlacedItemIds', () => {
   it('回傳所有已掛物件的id集合，不重複', () => {
     const def: PegboardState = { id: 'peg-1', type: 'pegboard', peg: PEG, placedItems: [] };
     let state = def;
-    state = placeItemOnPeg(state, 'a', 0, 0);
-    state = placeItemOnPeg(state, 'b', 1, 0);
+    state = placeItemOnPeg(state, 'p-a', 'a', 0, 0);
+    state = placeItemOnPeg(state, 'p-b', 'b', 1, 0);
     expect(allPegPlacedItemIds(state)).toEqual(new Set(['a', 'b']));
   });
 });

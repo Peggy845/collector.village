@@ -45,8 +45,8 @@ function pegCellFromPoint(pegEl: HTMLElement, clientX: number, clientY: number):
 export default function RoomDecorator() {
   const [zoom, setZoom] = useState<ZoomState>({ level: 'room' });
   const [furnitureStates, setFurnitureStates] = useState<Record<string, FurnitureState>>(initialFurnitureStates);
-  const [justPlacedId, setJustPlacedId] = useState<string | null>(null);
-  const [dragInfo, setDragInfo] = useState<{ itemId: string; origin: DragOrigin } | null>(null);
+  const [justPlacedPlacementId, setJustPlacedPlacementId] = useState<string | null>(null);
+  const [dragInfo, setDragInfo] = useState<{ itemId: string; placementId: string; origin: DragOrigin } | null>(null);
   const [dragPos, setDragPos] = useState<{
     x: number;
     y: number;
@@ -119,9 +119,11 @@ export default function RoomDecorator() {
       if (tierEl) {
         const targetTierIndex = Number(tierEl.dataset.tierIndex);
         // 放開手的水平位置決定插入在哪個順位（跟已放置項目的中點比較），讓同一層架內也能
-        // 拖到左邊/右邊換位置，不會永遠固定append到最右邊。
+        // 拖到左邊/右邊換位置，不會永遠固定append到最右邊。用data-placement-id（不是
+        // data-item-id）排除自己：同一itemId可能有好幾份放在畫面上，只有placementId能
+        // 唯一鎖定「正在被拖的到底是哪一份」。
         const itemEls = Array.from(tierEl.querySelectorAll<HTMLElement>('[data-item-id]')).filter(
-          (itemEl) => itemEl.dataset.itemId !== current.itemId
+          (itemEl) => itemEl.dataset.placementId !== current.placementId
         );
         let insertIndex = 0;
         for (const itemEl of itemEls) {
@@ -132,15 +134,16 @@ export default function RoomDecorator() {
 
         setFurnitureStates((prev) => {
           const bookshelf = prev[furnitureId] as BookshelfState;
-          let next = placeItemOnTier(bookshelf, targetTierIndex, current.itemId, insertIndex);
-          // 從這件家具的層架A拖到層架B是「搬移」，要把A那份拿掉；只有從收藏匣拖進來才是
-          // 「新增一份」（呼應無限制擺放：同一隻娃娃可以出現在不同家具，但同一件家具內搬移不該變複製）。
+          let next = placeItemOnTier(bookshelf, targetTierIndex, current.placementId, current.itemId, insertIndex);
+          // 只有從收藏匣拖進畫面才是「新增一份」，同一件家具內換層架一律只是搬移，來源
+          // 那份要清掉，不能變複製。同一時間只會zoom進去看一件家具（見本檔案開頭註解），
+          // 所以origin/target只會是同一件家具，不用處理跨家具搬移的情境。
           if (current.origin.type === 'tier' && current.origin.tierIndex !== targetTierIndex) {
-            next = removeItemFromTier(next, current.origin.tierIndex, current.itemId);
+            next = removeItemFromTier(next, current.origin.tierIndex, current.placementId);
           }
           return { ...prev, [furnitureId]: next };
         });
-        triggerSnap(current.itemId);
+        triggerSnap(current.placementId);
       } else if (binEl) {
         const r = binEl.getBoundingClientRect();
         const cellWidthPx = Number(binEl.dataset.cellWidthPx);
@@ -150,35 +153,37 @@ export default function RoomDecorator() {
 
         setFurnitureStates((prev) => {
           const bin = prev[furnitureId] as BinState;
-          const next = placeItemInBin(bin, current.itemId, col, row);
+          // 同一箱子內換格子由placeItemInBin自己依placementId去重處理，不用額外移除步驟。
+          const next = placeItemInBin(bin, current.placementId, current.itemId, col, row, ROOM_ITEMS_BY_ID);
           return { ...prev, [furnitureId]: next };
         });
-        triggerSnap(current.itemId);
+        triggerSnap(current.placementId);
       } else if (pegEl) {
         const { col, row } = pegCellFromPoint(pegEl, e.clientX, e.clientY);
 
         setFurnitureStates((prev) => {
           const peg = prev[furnitureId] as PegboardState;
-          const next = placeItemOnPeg(peg, current.itemId, col, row);
+          // 同一板子內換釘子由placeItemOnPeg自己依placementId去重處理，不用額外移除步驟。
+          const next = placeItemOnPeg(peg, current.placementId, current.itemId, col, row);
           return { ...prev, [furnitureId]: next };
         });
-        triggerSnap(current.itemId);
+        triggerSnap(current.placementId);
       } else if (trayEl) {
         if (current.origin.type === 'tier') {
           const tierIndex = current.origin.tierIndex;
           setFurnitureStates((prev) => {
             const bookshelf = prev[furnitureId] as BookshelfState;
-            return { ...prev, [furnitureId]: removeItemFromTier(bookshelf, tierIndex, current.itemId) };
+            return { ...prev, [furnitureId]: removeItemFromTier(bookshelf, tierIndex, current.placementId) };
           });
         } else if (current.origin.type === 'bin') {
           setFurnitureStates((prev) => {
             const bin = prev[furnitureId] as BinState;
-            return { ...prev, [furnitureId]: removeItemFromBin(bin, current.itemId) };
+            return { ...prev, [furnitureId]: removeItemFromBin(bin, current.placementId) };
           });
         } else if (current.origin.type === 'peg') {
           setFurnitureStates((prev) => {
             const peg = prev[furnitureId] as PegboardState;
-            return { ...prev, [furnitureId]: removeItemFromPeg(peg, current.itemId) };
+            return { ...prev, [furnitureId]: removeItemFromPeg(peg, current.placementId) };
           });
         }
       }
@@ -186,10 +191,10 @@ export default function RoomDecorator() {
       setDragInfo(null);
     }
 
-    function triggerSnap(itemId: string) {
-      setJustPlacedId(itemId);
+    function triggerSnap(placementId: string) {
+      setJustPlacedPlacementId(placementId);
       if (snapTimeoutRef.current) clearTimeout(snapTimeoutRef.current);
-      snapTimeoutRef.current = setTimeout(() => setJustPlacedId(null), 350);
+      snapTimeoutRef.current = setTimeout(() => setJustPlacedPlacementId(null), 350);
     }
 
     window.addEventListener('pointermove', handleMove);
@@ -200,8 +205,8 @@ export default function RoomDecorator() {
     };
   }, [dragInfo]);
 
-  function handleDragStart(itemId: string, origin: DragOrigin, clientX: number, clientY: number) {
-    setDragInfo({ itemId, origin });
+  function handleDragStart(itemId: string, placementId: string, origin: DragOrigin, clientX: number, clientY: number) {
+    setDragInfo({ itemId, placementId, origin });
     setDragPos({ x: clientX, y: clientY, hoverTierIndex: null, hoverBinCell: null, hoverPegCell: null });
   }
 
@@ -237,10 +242,11 @@ export default function RoomDecorator() {
               <FurnitureZoom
                 furnitureState={zoomedFurniture}
                 dragItemId={dragInfo?.itemId ?? null}
+                dragPlacementId={dragInfo?.placementId ?? null}
                 hoverTierIndex={dragInfo ? dragPos.hoverTierIndex : null}
-                justPlacedId={justPlacedId}
-                onItemPointerDown={(itemId, tierIndex, e) =>
-                  handleDragStart(itemId, { type: 'tier', tierIndex }, e.clientX, e.clientY)
+                justPlacedId={justPlacedPlacementId}
+                onItemPointerDown={(itemId, placementId, tierIndex, e) =>
+                  handleDragStart(itemId, placementId, { type: 'tier', tierIndex }, e.clientX, e.clientY)
                 }
                 onBack={handleBack}
               />
@@ -249,9 +255,10 @@ export default function RoomDecorator() {
               <BinZoom
                 furnitureState={zoomedFurniture}
                 dragItemId={dragInfo?.itemId ?? null}
+                dragPlacementId={dragInfo?.placementId ?? null}
                 hoverCell={dragInfo ? dragPos.hoverBinCell : null}
-                justPlacedId={justPlacedId}
-                onItemPointerDown={(itemId, e) => handleDragStart(itemId, { type: 'bin' }, e.clientX, e.clientY)}
+                justPlacedId={justPlacedPlacementId}
+                onItemPointerDown={(itemId, placementId, e) => handleDragStart(itemId, placementId, { type: 'bin' }, e.clientX, e.clientY)}
                 onBack={handleBack}
               />
             )}
@@ -259,9 +266,10 @@ export default function RoomDecorator() {
               <PegZoom
                 furnitureState={zoomedFurniture}
                 dragItemId={dragInfo?.itemId ?? null}
+                dragPlacementId={dragInfo?.placementId ?? null}
                 hoverCell={dragInfo ? dragPos.hoverPegCell : null}
-                justPlacedId={justPlacedId}
-                onItemPointerDown={(itemId, e) => handleDragStart(itemId, { type: 'peg' }, e.clientX, e.clientY)}
+                justPlacedId={justPlacedPlacementId}
+                onItemPointerDown={(itemId, placementId, e) => handleDragStart(itemId, placementId, { type: 'peg' }, e.clientX, e.clientY)}
                 onBack={handleBack}
               />
             )}
@@ -271,7 +279,7 @@ export default function RoomDecorator() {
         {isFurnitureZoomed && (
           <ItemTray
             draggingItemId={dragInfo?.itemId ?? null}
-            onItemPointerDown={(itemId, e) => handleDragStart(itemId, { type: 'tray' }, e.clientX, e.clientY)}
+            onItemPointerDown={(itemId, e) => handleDragStart(itemId, crypto.randomUUID(), { type: 'tray' }, e.clientX, e.clientY)}
           />
         )}
       </div>

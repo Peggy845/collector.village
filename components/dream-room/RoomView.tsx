@@ -12,12 +12,12 @@ function BookshelfThumb({ state }: { state: Extract<FurnitureState, { type: 'boo
           className="flex h-9 items-end gap-0.5 rounded-sm border-b-4 border-[#8A6B4C] bg-[#EFE3D6]/70 px-1.5"
           style={{ width: 130 }}
         >
-          {tier.placedItemIds.slice(0, 8).map((itemId) => {
-            const item = ROOM_ITEMS_BY_ID[itemId];
+          {tier.placedItems.slice(0, 8).map((placed) => {
+            const item = ROOM_ITEMS_BY_ID[placed.itemId];
             if (!item) return null;
             return (
               // eslint-disable-next-line @next/next/no-img-element
-              <img key={itemId} src={item.image} alt="" className="h-7 w-4 object-contain" draggable={false} />
+              <img key={placed.placementId} src={item.image} alt="" className="h-7 w-4 object-contain" draggable={false} />
             );
           })}
         </div>
@@ -34,7 +34,7 @@ function BinThumb({ state }: { state: Extract<FurnitureState, { type: 'stacking-
         if (!item) return null;
         return (
           // eslint-disable-next-line @next/next/no-img-element
-          <img key={placed.itemId} src={item.image} alt="" className="h-6 w-6 object-contain" draggable={false} />
+          <img key={placed.placementId} src={item.image} alt="" className="h-6 w-6 object-contain" draggable={false} />
         );
       })}
     </div>
@@ -49,7 +49,7 @@ function PegboardThumb({ state }: { state: Extract<FurnitureState, { type: 'pegb
         if (!item) return null;
         return (
           // eslint-disable-next-line @next/next/no-img-element
-          <img key={placed.itemId} src={item.image} alt="" className="h-6 w-6 object-contain" draggable={false} />
+          <img key={placed.placementId} src={item.image} alt="" className="h-6 w-6 object-contain" draggable={false} />
         );
       })}
     </div>

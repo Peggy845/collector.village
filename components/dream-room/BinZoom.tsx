@@ -12,6 +12,7 @@ type BinState = Extract<FurnitureState, { type: 'stacking-bin' }>;
 export default function BinZoom({
   furnitureState,
   dragItemId,
+  dragPlacementId,
   hoverCell,
   justPlacedId,
   onItemPointerDown,
@@ -19,9 +20,10 @@ export default function BinZoom({
 }: {
   furnitureState: BinState;
   dragItemId: string | null;
+  dragPlacementId: string | null;
   hoverCell: { col: number; row: number } | null;
   justPlacedId: string | null;
-  onItemPointerDown: (itemId: string, e: ReactPointerEvent) => void;
+  onItemPointerDown: (itemId: string, placementId: string, e: ReactPointerEvent) => void;
   onBack: () => void;
 }) {
   const { bin, placedItems } = furnitureState;
@@ -32,7 +34,7 @@ export default function BinZoom({
   const dragSpan = dragCandidate ? computeItemSpan(bin, dragCandidate) : null;
   const hoverFit =
     dragItemId && hoverCell
-      ? computeBinFit(bin, placedItems, ROOM_ITEMS_BY_ID, dragItemId, hoverCell.col, hoverCell.row, dragItemId)
+      ? computeBinFit(bin, placedItems, ROOM_ITEMS_BY_ID, dragItemId, hoverCell.col, hoverCell.row, dragPlacementId ?? undefined)
       : null;
 
   // 堆疊箱的深度是全箱共用單一上限（跟欄列格數無關），俯視縮圖依「欄」聚合——同一欄裡
@@ -100,9 +102,9 @@ export default function BinZoom({
           {placedItems.map((placed) => {
             const item = ROOM_ITEMS_BY_ID[placed.itemId];
             if (!item) return null;
-            const fit = computeBinFit(bin, placedItems, ROOM_ITEMS_BY_ID, placed.itemId, placed.col, placed.row, placed.itemId);
+            const fit = computeBinFit(bin, placedItems, ROOM_ITEMS_BY_ID, placed.itemId, placed.col, placed.row, placed.placementId);
             const isSquashed = fit.class === 'force-overflow';
-            const isBeingDragged = placed.itemId === dragItemId;
+            const isBeingDragged = placed.placementId === dragPlacementId;
 
             const widthPx = item.realWidthCm * PX_PER_CM;
             const heightPx = item.realHeightCm * PX_PER_CM;
@@ -119,15 +121,16 @@ export default function BinZoom({
 
             return (
               <div
-                key={placed.itemId}
+                key={placed.placementId}
                 data-item-id={placed.itemId}
+                data-placement-id={placed.placementId}
                 onPointerDown={(e) => {
                   e.preventDefault();
-                  onItemPointerDown(placed.itemId, e);
+                  onItemPointerDown(placed.itemId, placed.placementId, e);
                 }}
                 title="按住拖曳可以換位置、換家具，或移回收藏匣"
                 className={`touch-none transition-transform duration-500 ease-out ${
-                  placed.itemId === justPlacedId ? 'dreamroom-snap' : ''
+                  placed.placementId === justPlacedId ? 'dreamroom-snap' : ''
                 } ${isSquashed ? 'drop-shadow-[0_2px_6px_rgba(90,74,66,0.5)]' : 'drop-shadow-[0_2px_4px_rgba(90,74,66,0.3)]'}`}
                 style={style}
               >

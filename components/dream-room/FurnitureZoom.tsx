@@ -22,6 +22,7 @@ function tierGlowClass(fitClass: FitClass | null): string {
 export default function FurnitureZoom({
   furnitureState,
   dragItemId,
+  dragPlacementId,
   hoverTierIndex,
   justPlacedId,
   onItemPointerDown,
@@ -29,9 +30,10 @@ export default function FurnitureZoom({
 }: {
   furnitureState: BookshelfState;
   dragItemId: string | null;
+  dragPlacementId: string | null;
   hoverTierIndex: number | null;
   justPlacedId: string | null;
-  onItemPointerDown: (itemId: string, tierIndex: number, e: ReactPointerEvent) => void;
+  onItemPointerDown: (itemId: string, placementId: string, tierIndex: number, e: ReactPointerEvent) => void;
   onBack: () => void;
 }) {
   return (
@@ -50,12 +52,12 @@ export default function FurnitureZoom({
           const candidateFit = isHoverTarget ? computeTierFitForCandidate(tier, ROOM_ITEMS_BY_ID, dragItemId!) : null;
           const trackWidthPx = tier.usableWidthCm * PX_PER_CM;
 
-          const footprintItems = tier.placedItemIds
-            .map((itemId, indexInTier) => {
-              const item = ROOM_ITEMS_BY_ID[itemId];
+          const footprintItems = tier.placedItems
+            .map((placed, indexInTier) => {
+              const item = ROOM_ITEMS_BY_ID[placed.itemId];
               if (!item) return null;
               const fit = computeFitForPlacedItem(tier, ROOM_ITEMS_BY_ID, indexInTier);
-              return { id: itemId, widthCm: item.realWidthCm, depthCm: item.realDepthCm, overflow: fit.depthStatus === 'overflow' };
+              return { id: placed.placementId, widthCm: item.realWidthCm, depthCm: item.realDepthCm, overflow: fit.depthStatus === 'overflow' };
             })
             .filter((x): x is { id: string; widthCm: number; depthCm: number; overflow: boolean } => x !== null);
 
@@ -68,12 +70,12 @@ export default function FurnitureZoom({
                 } ${tierGlowClass(candidateFit?.class ?? null)}`}
                 style={{ width: trackWidthPx, height: tier.clearanceHeightCm * PX_PER_CM }}
               >
-                {tier.placedItemIds.map((itemId, indexInTier) => {
-                  const item = ROOM_ITEMS_BY_ID[itemId];
+                {tier.placedItems.map((placed, indexInTier) => {
+                  const item = ROOM_ITEMS_BY_ID[placed.itemId];
                   if (!item) return null;
                   const fit = computeFitForPlacedItem(tier, ROOM_ITEMS_BY_ID, indexInTier);
                   const isSquashed = fit.class === 'force-overflow';
-                  const isBeingDragged = itemId === dragItemId;
+                  const isBeingDragged = placed.placementId === dragPlacementId;
 
                   // 深度在正面視角沒有專屬的軸可以擠，超出時對兩軸都套一點統一的收縮，
                   // 讓「太厚塞不下」跟「太寬/太高塞不下」在正面視角至少有點視覺區別可循，
@@ -92,15 +94,16 @@ export default function FurnitureZoom({
 
                   return (
                     <div
-                      key={itemId}
-                      data-item-id={itemId}
+                      key={placed.placementId}
+                      data-item-id={placed.itemId}
+                      data-placement-id={placed.placementId}
                       onPointerDown={(e) => {
                         e.preventDefault();
-                        onItemPointerDown(itemId, tier.index, e);
+                        onItemPointerDown(placed.itemId, placed.placementId, tier.index, e);
                       }}
                       title="按住拖曳可以換位置、換層架，或移回收藏匣"
                       className={`relative shrink-0 touch-none transition-transform duration-500 ease-out ${
-                        itemId === justPlacedId ? 'dreamroom-snap' : ''
+                        placed.placementId === justPlacedId ? 'dreamroom-snap' : ''
                       } ${isSquashed ? 'drop-shadow-[0_2px_6px_rgba(90,74,66,0.5)]' : 'drop-shadow-[0_2px_4px_rgba(90,74,66,0.3)]'}`}
                       style={style}
                     >

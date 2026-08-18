@@ -1,9 +1,10 @@
 'use client';
 
-// 真3D技術驗證的第二階段：不再是寫死2隻娃娃的靜態展示，改成接上正式的資料層
-// （lib/dream-room/furniture.ts的BOOKSHELF定義、lib/dream-room/placement.ts的碰撞/貼合純函式、
-// 完整8隻ROOM_ITEMS），驗證「真3D渲染」跟「現有房間布置的資料/狀態模型」接得起來、
-// 拖曳互動（收藏匣→層架、層架內換位置、層架→層架、拖回收藏匣移除）在3D下走得通。
+// 真3D技術驗證的第三階段：書櫃（單一軸向排隊）之外，加上透明堆疊箱（2D網格、AABB碰撞）
+// 驗證「真的不一樣的碰撞模型」在真3D下也撐得住，不是只有書櫃這一種簡單case才work。
+// 兩件家具同時放在同一個場景裡，共用同一個收藏匣，可以互相跨家具擺放。只有從收藏匣
+// 拖進畫面才會新增一份，畫面內移動（不管同一件家具內換層架/格子、還是跨家具搬）一律
+// 只是搬移，來源那份要正確移除，不能變複製（2026-08-18 Peggy 實測抓到才確認這條規則）。
 // 仍然是獨立的驗證頁面，沒有接進正式的/dream-room/room（那邊還是CSS正視圖版本）。
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Canvas, type ThreeEvent, useThree } from '@react-three/fiber';
@@ -11,8 +12,10 @@ import { OrbitControls, useTexture } from '@react-three/drei';
 import * as THREE from 'three';
 import {
   BOOKSHELF,
+  STACKING_BIN,
   createInitialFurnitureState,
   type FurnitureState,
+  type PlacedTierItem,
   type TierDef,
   type TierState,
 } from '@/lib/dream-room/furniture';
@@ -22,14 +25,18 @@ import {
   placeItemOnTier,
   removeItemFromTier,
 } from '@/lib/dream-room/placement';
+import { computeBinFit, placeItemInBin, removeItemFromBin } from '@/lib/dream-room/binPlacement';
 import { ROOM_ITEMS_BY_ID } from '@/lib/dream-room/roomItems';
 import ItemTray from '@/components/dream-room/ItemTray';
 
 type BookshelfState = Extract<FurnitureState, { type: 'bookshelf' }>;
+type BinState = Extract<FurnitureState, { type: 'stacking-bin' }>;
 
 const GAP_CM = 3; // 層架之間的垂直間距
 const SIDE_COLOR = '#c9a27b';
 const SIDE_COLOR_HOVER = '#e0b98c';
+const BIN_COLOR = '#8fb4c9';
+const BIN_COLOR_HOVER = '#a9cbdd';
 
 // 由下往上疊（陣列index2排最下面、index0排最上面，跟FurnitureZoom.tsx的正視圖上到下順序一致），
 // 算好每一層的y起點，模組層級算一次即可，家具定義本身不會變動。
@@ -46,24 +53,52 @@ const TIER_Y_BASE: Record<number, number> = (() => {
 const TOTAL_HEIGHT = Math.max(...BOOKSHELF.tiers.map((t) => TIER_Y_BASE[t.index] + t.clearanceHeightCm));
 const MAX_WIDTH = Math.max(...BOOKSHELF.tiers.map((t) => t.usableWidthCm));
 
+// 堆疊箱放在書櫃右邊，兩件家具在同一個房間場景裡，不互相重疊。
+const BIN = STACKING_BIN.bin;
+const BIN_WIDTH = BIN.cols * BIN.cellWidthCm;
+const BIN_HEIGHT = BIN.rows * BIN.cellHeightCm;
+const BIN_CENTER_X = MAX_WIDTH / 2 + 30 + BIN_WIDTH / 2;
+const BIN_LEFT = BIN_CENTER_X - BIN_WIDTH / 2;
+
+function binCellFromPoint(point: THREE.Vector3): { col: number; row: number } {
+  const col = Math.floor((point.x - BIN_LEFT) / BIN.cellWidthCm);
+  const row = Math.floor((BIN_HEIGHT - point.y) / BIN.cellHeightCm);
+  return { col, row };
+}
+
+// 錨點是格子(col,row)的左上角，娃娃實際尺寸往右下延伸——跟2D版BinZoom.tsx（left/top用格子左上角、
+// width/height用娃娃實際像素尺寸）同一個錨點規則，也跟computeBinFit的colSpan/rowSpan碰撞判定一致。
+// 娃娃常常比一格大（例如14x18cm放進12x12cm格），如果誤用「格子正中心」當娃娃中心點，
+// 娃娃會偏離自己實際佔用的格子範圍，跟旁邊格子的視覺/碰撞就對不起來。
+function binCellCenterWorld(col: number, row: number, item: { realWidthCm: number; realHeightCm: number }): { x: number; y: number } {
+  return {
+    x: BIN_LEFT + col * BIN.cellWidthCm + item.realWidthCm / 2,
+    y: BIN_HEIGHT - (row * BIN.cellHeightCm + item.realHeightCm / 2),
+  };
+}
+
 // 給一層架跟排列順序（已排除正在拖曳中的那個），算出每個item由左到右累加排隊後的中心x
 // （tier本身以x=0置中，範圍是[-usableWidthCm/2, +usableWidthCm/2]），跟TopDownFootprint.tsx
-// 的累加邏輯同一個精神，只是這裡輸出世界座標x而不是px。
-function tierItemPositions(tier: TierDef, itemIds: string[]): { id: string; centerX: number; widthCm: number }[] {
+// 的累加邏輯同一個精神，只是這裡輸出世界座標x而不是px。用placementId當識別（不是itemId），
+// 同一itemId才能在同一層架同時存在好幾份互不影響的「無限制擺放」。
+function tierItemPositions(
+  tier: TierDef,
+  items: PlacedTierItem[]
+): { placementId: string; itemId: string; centerX: number; widthCm: number }[] {
   let cursor = -tier.usableWidthCm / 2;
-  const result: { id: string; centerX: number; widthCm: number }[] = [];
-  for (const id of itemIds) {
-    const item = ROOM_ITEMS_BY_ID[id];
+  const result: { placementId: string; itemId: string; centerX: number; widthCm: number }[] = [];
+  for (const p of items) {
+    const item = ROOM_ITEMS_BY_ID[p.itemId];
     if (!item) continue;
     const centerX = cursor + item.realWidthCm / 2;
-    result.push({ id, centerX, widthCm: item.realWidthCm });
+    result.push({ placementId: p.placementId, itemId: p.itemId, centerX, widthCm: item.realWidthCm });
     cursor += item.realWidthCm;
   }
   return result;
 }
 
-function computeInsertIndex(tier: TierState, dropWorldX: number, excludeItemId: string): number {
-  const others = tier.placedItemIds.filter((id) => id !== excludeItemId);
+function computeInsertIndex(tier: TierState, dropWorldX: number, excludePlacementId: string): number {
+  const others = tier.placedItems.filter((p) => p.placementId !== excludePlacementId);
   const positions = tierItemPositions(tier, others);
   let insertIndex = 0;
   for (const { centerX } of positions) {
@@ -78,12 +113,17 @@ interface SceneCtx {
   gl: THREE.WebGLRenderer;
 }
 
-function raycastTierPlanes(
+type HitResult =
+  | { kind: 'tier'; tierIndex: number; point: THREE.Vector3 }
+  | { kind: 'bin'; col: number; row: number; point: THREE.Vector3 };
+
+function raycastFurniture(
   clientX: number,
   clientY: number,
   ctx: SceneCtx | null,
-  tierPlanes: Record<number, THREE.Mesh | null>
-): { tierIndex: number; point: THREE.Vector3 } | null {
+  tierPlanes: Record<number, THREE.Mesh | null>,
+  binPlane: THREE.Mesh | null
+): HitResult | null {
   if (!ctx) return null;
   const rect = ctx.gl.domElement.getBoundingClientRect();
   if (clientX < rect.left || clientX > rect.right || clientY < rect.top || clientY > rect.bottom) return null;
@@ -93,12 +133,15 @@ function raycastTierPlanes(
   );
   const raycaster = new THREE.Raycaster();
   raycaster.setFromCamera(ndc, ctx.camera);
-  const planes = Object.values(tierPlanes).filter((m): m is THREE.Mesh => m !== null);
-  const hits = raycaster.intersectObjects(planes, false);
+  const targets = [...Object.values(tierPlanes).filter((m): m is THREE.Mesh => m !== null)];
+  if (binPlane) targets.push(binPlane);
+  const hits = raycaster.intersectObjects(targets, false);
   if (hits.length === 0) return null;
   const hit = hits[0];
-  const tierIndex = (hit.object.userData as { tierIndex: number }).tierIndex;
-  return { tierIndex, point: hit.point };
+  const data = hit.object.userData as { kind: 'tier'; tierIndex: number } | { kind: 'bin' };
+  if (data.kind === 'tier') return { kind: 'tier', tierIndex: data.tierIndex, point: hit.point };
+  const { col, row } = binCellFromPoint(hit.point);
+  return { kind: 'bin', col, row, point: hit.point };
 }
 
 function SceneBridge({ onReady }: { onReady: (ctx: SceneCtx) => void }) {
@@ -107,6 +150,25 @@ function SceneBridge({ onReady }: { onReady: (ctx: SceneCtx) => void }) {
     onReady({ camera, gl });
   }, [camera, gl, onReady]);
   return null;
+}
+
+// 娃娃只有正面（material-4）貼真實照片，其餘5面（側面/上下/背面）沒有照片可貼，只能給
+// 純色佔位——相機不是正對娃娃時這些面會露出來，故意選偏暗的中性色（不是照片的一部分，
+// 不該搶視覺重量），比原本的淡褐色 #ddc9b4 更不顯眼，露出來時看起來像陰影面而不是一塊亮白牌子。
+const DOLL_SIDE_COLOR = '#5c4f42';
+
+function useDollMaterials(textureUrl: string, opacity = 1) {
+  const texture = useTexture(textureUrl);
+  return (
+    <>
+      <meshStandardMaterial attach="material-0" color={DOLL_SIDE_COLOR} transparent={opacity < 1} opacity={opacity} />
+      <meshStandardMaterial attach="material-1" color={DOLL_SIDE_COLOR} transparent={opacity < 1} opacity={opacity} />
+      <meshStandardMaterial attach="material-2" color={DOLL_SIDE_COLOR} transparent={opacity < 1} opacity={opacity} />
+      <meshStandardMaterial attach="material-3" color={DOLL_SIDE_COLOR} transparent={opacity < 1} opacity={opacity} />
+      <meshStandardMaterial attach="material-4" map={texture} transparent alphaTest={0.3} opacity={opacity} />
+      <meshStandardMaterial attach="material-5" color={DOLL_SIDE_COLOR} transparent={opacity < 1} opacity={opacity} />
+    </>
+  );
 }
 
 // 一隻已經放在層架上、目前沒有被拖曳的娃娃，靜態渲染在算好的貼合位置，貼合狀態
@@ -127,7 +189,6 @@ function PlacedDollMesh({
   onPointerDown: (e: ThreeEvent<PointerEvent>) => void;
 }) {
   const item = ROOM_ITEMS_BY_ID[itemId];
-  const texture = useTexture(item.image);
   const fit = computeFitForPlacedItem(tier, ROOM_ITEMS_BY_ID, indexInTier);
   const isForceOverflow = fit.class === 'force-overflow';
   const scaleX = fit.widthStatus === 'overflow' ? 1 - fit.widthSquash : 1;
@@ -146,30 +207,54 @@ function PlacedDollMesh({
       renderOrder={isForceOverflow ? 1 : 0}
     >
       <boxGeometry args={[item.realWidthCm, item.realHeightCm, item.realDepthCm]} />
-      <meshStandardMaterial attach="material-0" color="#ddc9b4" />
-      <meshStandardMaterial attach="material-1" color="#ddc9b4" />
-      <meshStandardMaterial attach="material-2" color="#ddc9b4" />
-      <meshStandardMaterial attach="material-3" color="#ddc9b4" />
-      <meshStandardMaterial attach="material-4" map={texture} transparent alphaTest={0.3} />
-      <meshStandardMaterial attach="material-5" color="#ddc9b4" />
+      {useDollMaterials(item.image)}
     </mesh>
   );
 }
 
-// 正在被拖曳中的娃娃（來源是層架上既有的項目），用一片面向鏡頭、通過拖曳起點的隱形平面
-// 追蹤滑鼠/手指位置，不在拖曳中即時判斷/夾住落在哪一層，放開手才由外層做正式的落點判斷。
+// 堆疊箱裡一隻已放置的娃娃：碰撞是二元的（重疊或不重疊），跟書櫃連續的擠壓比例不同，
+// 超出時固定縮小+旋轉一點模擬「硬塞歪了」，跟2D版BinZoom.tsx的scale(0.82) rotate(-3deg)同精神。
+function PlacedBinDollMesh({
+  bin,
+  placedItems,
+  placed,
+  onPointerDown,
+}: {
+  bin: BinState['bin'];
+  placedItems: BinState['placedItems'];
+  placed: BinState['placedItems'][number];
+  onPointerDown: (e: ThreeEvent<PointerEvent>) => void;
+}) {
+  const item = ROOM_ITEMS_BY_ID[placed.itemId];
+  const fit = computeBinFit(bin, placedItems, ROOM_ITEMS_BY_ID, placed.itemId, placed.col, placed.row, placed.placementId);
+  const isForceOverflow = fit.class === 'force-overflow';
+  const { x, y } = binCellCenterWorld(placed.col, placed.row, item);
+  const z = item.realDepthCm / 2;
+
+  return (
+    <mesh
+      position={[x, y, z]}
+      rotation={isForceOverflow ? [0, 0, -0.18] : [0, 0, 0]}
+      scale={isForceOverflow ? [0.82, 0.82, 0.82] : [1, 1, 1]}
+      castShadow
+      receiveShadow
+      onPointerDown={onPointerDown}
+      renderOrder={isForceOverflow ? 1 : 0}
+    >
+      <boxGeometry args={[item.realWidthCm, item.realHeightCm, item.realDepthCm]} />
+      {useDollMaterials(item.image)}
+    </mesh>
+  );
+}
+
+// 正在被拖曳中的娃娃（來源是層架或堆疊箱上既有的項目），用一片面向鏡頭、通過拖曳起點的
+// 隱形平面追蹤滑鼠/手指位置，不在拖曳中即時判斷/夾住落點，放開手才由外層做正式的落點判斷。
 function DraggingDollMesh({ itemId, livePosition }: { itemId: string; livePosition: THREE.Vector3 }) {
   const item = ROOM_ITEMS_BY_ID[itemId];
-  const texture = useTexture(item.image);
   return (
     <mesh position={livePosition} renderOrder={2}>
       <boxGeometry args={[item.realWidthCm, item.realHeightCm, item.realDepthCm]} />
-      <meshStandardMaterial attach="material-0" color="#ddc9b4" opacity={0.9} transparent />
-      <meshStandardMaterial attach="material-1" color="#ddc9b4" opacity={0.9} transparent />
-      <meshStandardMaterial attach="material-2" color="#ddc9b4" opacity={0.9} transparent />
-      <meshStandardMaterial attach="material-3" color="#ddc9b4" opacity={0.9} transparent />
-      <meshStandardMaterial attach="material-4" map={texture} transparent alphaTest={0.3} opacity={0.9} />
-      <meshStandardMaterial attach="material-5" color="#ddc9b4" opacity={0.9} transparent />
+      {useDollMaterials(item.image, 0.9)}
     </mesh>
   );
 }
@@ -215,7 +300,7 @@ function TierCompartment({
       <mesh
         ref={(mesh) => registerHitPlane(tier.index, mesh)}
         position={[0, yBase + h / 2, d / 2]}
-        userData={{ tierIndex: tier.index }}
+        userData={{ kind: 'tier', tierIndex: tier.index }}
       >
         <planeGeometry args={[w, h]} />
         <meshBasicMaterial transparent opacity={0} side={THREE.DoubleSide} depthWrite={false} />
@@ -224,18 +309,121 @@ function TierCompartment({
   );
 }
 
-type DragInfo = { itemId: string; origin: 'tray' | 'tier'; originTierIndex?: number };
+// 堆疊箱格線：純視覺輔助，讓玩家看得出幾欄幾列，用bufferGeometry手畫線段，
+// 座標直接算成世界座標（含BIN_CENTER_X位移），不用額外的group transform。
+function BinGridLines({ depth }: { depth: number }) {
+  const positions = useMemo(() => {
+    const pts: number[] = [];
+    for (let c = 0; c <= BIN.cols; c++) {
+      const x = BIN_LEFT + c * BIN.cellWidthCm;
+      pts.push(x, 0, depth, x, BIN_HEIGHT, depth);
+    }
+    for (let r = 0; r <= BIN.rows; r++) {
+      const y = r * BIN.cellHeightCm;
+      pts.push(BIN_LEFT, y, depth, BIN_LEFT + BIN_WIDTH, y, depth);
+    }
+    return new Float32Array(pts);
+  }, [depth]);
+
+  return (
+    <lineSegments>
+      <bufferGeometry>
+        <bufferAttribute attach="attributes-position" args={[positions, 3]} />
+      </bufferGeometry>
+      <lineBasicMaterial color="#5f88a0" transparent opacity={0.5} />
+    </lineSegments>
+  );
+}
+
+// 透明堆疊箱：外殼用半透明材質（呼應「透明」的產品設定），跟書櫃的實木不透明外觀刻意做出區隔。
+function BinCompartment({
+  isHovered,
+  registerHitPlane,
+}: {
+  isHovered: boolean;
+  registerHitPlane: (mesh: THREE.Mesh | null) => void;
+}) {
+  const w = BIN_WIDTH;
+  const h = BIN_HEIGHT;
+  const d = BIN.depthCm;
+  const cx = BIN_CENTER_X;
+  const color = isHovered ? BIN_COLOR_HOVER : BIN_COLOR;
+  return (
+    <group>
+      <mesh position={[cx, h / 2, 0]} receiveShadow>
+        <planeGeometry args={[w, h]} />
+        <meshStandardMaterial color={color} transparent opacity={0.2} side={THREE.DoubleSide} />
+      </mesh>
+      <mesh position={[cx - w / 2, h / 2, d / 2]} rotation={[0, Math.PI / 2, 0]}>
+        <planeGeometry args={[d, h]} />
+        <meshStandardMaterial color={color} transparent opacity={0.25} side={THREE.DoubleSide} />
+      </mesh>
+      <mesh position={[cx + w / 2, h / 2, d / 2]} rotation={[0, -Math.PI / 2, 0]}>
+        <planeGeometry args={[d, h]} />
+        <meshStandardMaterial color={color} transparent opacity={0.25} side={THREE.DoubleSide} />
+      </mesh>
+      <mesh position={[cx, h, d / 2]} rotation={[Math.PI / 2, 0, 0]}>
+        <planeGeometry args={[w, d]} />
+        <meshStandardMaterial color={color} transparent opacity={0.25} side={THREE.DoubleSide} />
+      </mesh>
+      <mesh position={[cx, 0, d / 2]} rotation={[-Math.PI / 2, 0, 0]} receiveShadow>
+        <planeGeometry args={[w, d]} />
+        <meshStandardMaterial color={color} transparent opacity={0.3} side={THREE.DoubleSide} />
+      </mesh>
+      <BinGridLines depth={d} />
+      {/* 隱形的落點判定面，覆蓋整個網格，拖曳放開手時用射線+binCellFromPoint算出第幾欄第幾列 */}
+      <mesh
+        ref={(mesh) => registerHitPlane(mesh)}
+        position={[cx, h / 2, d / 2]}
+        userData={{ kind: 'bin' }}
+      >
+        <planeGeometry args={[w, h]} />
+        <meshBasicMaterial transparent opacity={0} side={THREE.DoubleSide} depthWrite={false} />
+      </mesh>
+    </group>
+  );
+}
+
+// 拖曳中懸停在堆疊箱上方時的落點預覽方塊，綠色代表放得下、紅色代表會重疊/超出深度/超出邊界，
+// 跟2D版BinZoom.tsx的hover高亮同一個精神。改用娃娃實際尺寸畫（不是固定一格大小）——娃娃
+// 常常比一格大，如果預覽只畫一格，玩家會以為放得下、放開手才發現其實佔了旁邊的格子撞到別隻，
+// 這正是「明明看起來有空位卻還是被判定重疊」讓人困惑的主要原因。
+function BinHoverPreview({
+  col,
+  row,
+  item,
+  fitsOk,
+}: {
+  col: number;
+  row: number;
+  item: { realWidthCm: number; realHeightCm: number };
+  fitsOk: boolean;
+}) {
+  const { x, y } = binCellCenterWorld(col, row, item);
+  return (
+    <mesh position={[x, y, BIN.depthCm / 2]}>
+      <planeGeometry args={[item.realWidthCm * 0.95, item.realHeightCm * 0.95]} />
+      <meshBasicMaterial color={fitsOk ? '#4ade80' : '#f87171'} transparent opacity={0.35} side={THREE.DoubleSide} />
+    </mesh>
+  );
+}
+
+type DragOrigin = { type: 'tray' } | { type: 'tier'; tierIndex: number } | { type: 'bin' };
+type DragInfo = { itemId: string; placementId: string; origin: DragOrigin };
 
 export default function ThreeDShelfSpike() {
   const [furnitureState, setFurnitureState] = useState<BookshelfState>(() => createInitialFurnitureState(BOOKSHELF));
+  const [binState, setBinState] = useState<BinState>(() => createInitialFurnitureState(STACKING_BIN));
   const [dragInfo, setDragInfo] = useState<DragInfo | null>(null);
   const [dragScreenPos, setDragScreenPos] = useState({ x: 0, y: 0 });
   const [dragLivePosition, setDragLivePosition] = useState<THREE.Vector3 | null>(null);
   const [hoverTierIndex, setHoverTierIndex] = useState<number | null>(null);
+  const [hoverBinCell, setHoverBinCell] = useState<{ col: number; row: number } | null>(null);
   const [orbitEnabled, setOrbitEnabled] = useState(true);
 
   const sceneCtxRef = useRef<SceneCtx | null>(null);
   const tierPlanesRef = useRef<Record<number, THREE.Mesh | null>>({});
+  const binPlaneRef = useRef<THREE.Mesh | null>(null);
   const dragPlaneRef = useRef<THREE.Plane | null>(null);
   const dragInfoRef = useRef<DragInfo | null>(null);
   useEffect(() => {
@@ -245,26 +433,36 @@ export default function ThreeDShelfSpike() {
   const handleSceneReady = useCallback((ctx: SceneCtx) => {
     sceneCtxRef.current = ctx;
   }, []);
-  const registerHitPlane = useCallback((tierIndex: number, mesh: THREE.Mesh | null) => {
+  const registerTierHitPlane = useCallback((tierIndex: number, mesh: THREE.Mesh | null) => {
     tierPlanesRef.current[tierIndex] = mesh;
   }, []);
+  const registerBinHitPlane = useCallback((mesh: THREE.Mesh | null) => {
+    binPlaneRef.current = mesh;
+  }, []);
 
-  function startDrag(itemId: string, origin: 'tray' | 'tier', originTierIndex: number | undefined, clientX: number, clientY: number) {
-    setDragInfo({ itemId, origin, originTierIndex });
+  function startDrag(itemId: string, placementId: string, origin: DragOrigin, clientX: number, clientY: number) {
+    setDragInfo({ itemId, placementId, origin });
     setDragScreenPos({ x: clientX, y: clientY });
     setOrbitEnabled(false);
 
-    if (origin === 'tier' && sceneCtxRef.current) {
-      // 拖曳起點：從目前這隻娃娃已經算好的貼合位置，建一片面向鏡頭、通過該位置的隱形平面。
-      const tier = furnitureState.tiers.find((t) => t.index === originTierIndex)!;
-      const positions = tierItemPositions(tier, tier.placedItemIds);
-      const pos = positions.find((p) => p.id === itemId);
-      const item = ROOM_ITEMS_BY_ID[itemId];
-      const startPoint = new THREE.Vector3(
-        pos?.centerX ?? 0,
-        TIER_Y_BASE[originTierIndex!] + item.realHeightCm / 2,
-        item.realDepthCm / 2
-      );
+    if (!sceneCtxRef.current) return;
+    let startPoint: THREE.Vector3 | null = null;
+    const item = ROOM_ITEMS_BY_ID[itemId];
+
+    if (origin.type === 'tier') {
+      const tier = furnitureState.tiers.find((t) => t.index === origin.tierIndex)!;
+      const positions = tierItemPositions(tier, tier.placedItems);
+      const pos = positions.find((p) => p.placementId === placementId);
+      startPoint = new THREE.Vector3(pos?.centerX ?? 0, TIER_Y_BASE[origin.tierIndex] + item.realHeightCm / 2, item.realDepthCm / 2);
+    } else if (origin.type === 'bin') {
+      const placed = binState.placedItems.find((p) => p.placementId === placementId);
+      if (placed) {
+        const { x, y } = binCellCenterWorld(placed.col, placed.row, item);
+        startPoint = new THREE.Vector3(x, y, item.realDepthCm / 2);
+      }
+    }
+
+    if (startPoint) {
       const normal = new THREE.Vector3();
       sceneCtxRef.current.camera.getWorldDirection(normal);
       dragPlaneRef.current = new THREE.Plane().setFromNormalAndCoplanarPoint(normal, startPoint);
@@ -278,11 +476,12 @@ export default function ThreeDShelfSpike() {
     function handleMove(e: PointerEvent) {
       setDragScreenPos({ x: e.clientX, y: e.clientY });
 
-      const hit = raycastTierPlanes(e.clientX, e.clientY, sceneCtxRef.current, tierPlanesRef.current);
-      setHoverTierIndex(hit ? hit.tierIndex : null);
+      const hit = raycastFurniture(e.clientX, e.clientY, sceneCtxRef.current, tierPlanesRef.current, binPlaneRef.current);
+      setHoverTierIndex(hit?.kind === 'tier' ? hit.tierIndex : null);
+      setHoverBinCell(hit?.kind === 'bin' ? { col: hit.col, row: hit.row } : null);
 
       const current = dragInfoRef.current;
-      if (current?.origin === 'tier' && dragPlaneRef.current && sceneCtxRef.current) {
+      if (current && dragPlaneRef.current && sceneCtxRef.current) {
         const rect = sceneCtxRef.current.gl.domElement.getBoundingClientRect();
         const ndc = new THREE.Vector2(
           ((e.clientX - rect.left) / rect.width) * 2 - 1,
@@ -305,29 +504,43 @@ export default function ThreeDShelfSpike() {
       const trayEl = el?.closest('[data-tray-zone]');
 
       if (trayEl) {
-        if (current.origin === 'tier' && current.originTierIndex !== undefined) {
-          setFurnitureState((prev) => removeItemFromTier(prev, current.originTierIndex!, current.itemId));
+        if (current.origin.type === 'tier') {
+          const originTierIndex = current.origin.tierIndex;
+          setFurnitureState((prev) => removeItemFromTier(prev, originTierIndex, current.placementId));
+        } else if (current.origin.type === 'bin') {
+          setBinState((prev) => removeItemFromBin(prev, current.placementId));
         }
       } else {
-        const hit = raycastTierPlanes(e.clientX, e.clientY, sceneCtxRef.current, tierPlanesRef.current);
-        if (hit) {
+        const hit = raycastFurniture(e.clientX, e.clientY, sceneCtxRef.current, tierPlanesRef.current, binPlaneRef.current);
+        if (hit?.kind === 'tier') {
           setFurnitureState((prev) => {
             const tier = prev.tiers.find((t) => t.index === hit.tierIndex)!;
-            const insertAt = computeInsertIndex(tier, hit.point.x, current.itemId);
-            const placed = placeItemOnTier(prev, hit.tierIndex, current.itemId, insertAt);
-            // 從層架A拖到層架B是「搬移」，要把A那份拿掉；只有從收藏匣拖進來才是「新增一份」
-            // （呼應無限制擺放：同一隻娃娃可以出現在不同家具，但同一件家具內搬移不該變複製）。
-            if (current.origin === 'tier' && current.originTierIndex !== undefined && current.originTierIndex !== hit.tierIndex) {
-              return removeItemFromTier(placed, current.originTierIndex, current.itemId);
+            const insertAt = computeInsertIndex(tier, hit.point.x, current.placementId);
+            let placed = placeItemOnTier(prev, hit.tierIndex, current.placementId, current.itemId, insertAt);
+            // 只有從收藏匣拖進畫面才是「新增一份」，畫面內移動（不管同一件家具內換層架、
+            // 還是跨家具搬）一律只是搬移，來源那份都要清掉，不能變複製。
+            if (current.origin.type === 'tier' && current.origin.tierIndex !== hit.tierIndex) {
+              placed = removeItemFromTier(placed, current.origin.tierIndex, current.placementId);
             }
             return placed;
           });
+          if (current.origin.type === 'bin') {
+            setBinState((prev) => removeItemFromBin(prev, current.placementId));
+          }
+        } else if (hit?.kind === 'bin') {
+          setBinState((prev) => placeItemInBin(prev, current.placementId, current.itemId, hit.col, hit.row, ROOM_ITEMS_BY_ID));
+          // 同一堆疊箱內搬移由placeItemInBin自己去重處理；跨家具(書櫃→堆疊箱)要另外把書櫃那份清掉。
+          if (current.origin.type === 'tier') {
+            const originTierIndex = current.origin.tierIndex;
+            setFurnitureState((prev) => removeItemFromTier(prev, originTierIndex, current.placementId));
+          }
         }
       }
 
       setDragInfo(null);
       setDragLivePosition(null);
       setHoverTierIndex(null);
+      setHoverBinCell(null);
       setOrbitEnabled(true);
       dragPlaneRef.current = null;
     }
@@ -340,7 +553,7 @@ export default function ThreeDShelfSpike() {
     };
   }, [dragInfo]);
 
-  const dragImage = dragInfo?.origin === 'tray' ? ROOM_ITEMS_BY_ID[dragInfo.itemId] : null;
+  const dragImage = dragInfo?.origin.type === 'tray' ? ROOM_ITEMS_BY_ID[dragInfo.itemId] : null;
 
   const hoverFitClass = useMemo(() => {
     if (!dragInfo || hoverTierIndex === null) return null;
@@ -349,14 +562,19 @@ export default function ThreeDShelfSpike() {
     return computeTierFitForCandidate(tier, ROOM_ITEMS_BY_ID, dragInfo.itemId).class;
   }, [dragInfo, hoverTierIndex, furnitureState]);
 
+  const binHoverFit = useMemo(() => {
+    if (!dragInfo || !hoverBinCell) return null;
+    return computeBinFit(BIN, binState.placedItems, ROOM_ITEMS_BY_ID, dragInfo.itemId, hoverBinCell.col, hoverBinCell.row, dragInfo.placementId);
+  }, [dragInfo, hoverBinCell, binState]);
+
   return (
     <div className="relative">
       <div className="h-[65vh] w-full overflow-hidden rounded-3xl bg-[#2b2420]">
-        <Canvas shadows camera={{ position: [70, 55, 95], fov: 42 }}>
+        <Canvas shadows camera={{ position: [110, 65, 150], fov: 40 }}>
           <SceneBridge onReady={handleSceneReady} />
           <ambientLight intensity={0.6} />
           <directionalLight
-            position={[40, 60, 40]}
+            position={[60, 70, 60]}
             intensity={1.1}
             castShadow
             shadow-mapSize-width={1024}
@@ -368,55 +586,85 @@ export default function ThreeDShelfSpike() {
               tier={tier}
               yBase={TIER_Y_BASE[tier.index]}
               isHovered={hoverTierIndex === tier.index}
-              registerHitPlane={registerHitPlane}
+              registerHitPlane={registerTierHitPlane}
             />
           ))}
           {furnitureState.tiers.map((tier) => {
-            const positions = tierItemPositions(tier, tier.placedItemIds);
-            return tier.placedItemIds.map((itemId, indexInTier) => {
-              if (dragInfo?.origin === 'tier' && dragInfo.itemId === itemId) return null;
-              const pos = positions.find((p) => p.id === itemId);
+            const positions = tierItemPositions(tier, tier.placedItems);
+            return tier.placedItems.map((placed, indexInTier) => {
+              if (dragInfo?.origin.type === 'tier' && dragInfo.placementId === placed.placementId) return null;
+              const pos = positions.find((p) => p.placementId === placed.placementId);
               if (!pos) return null;
               return (
                 <PlacedDollMesh
-                  key={itemId}
+                  key={placed.placementId}
                   tier={tier}
                   yBase={TIER_Y_BASE[tier.index]}
-                  itemId={itemId}
+                  itemId={placed.itemId}
                   centerX={pos.centerX}
                   indexInTier={indexInTier}
                   onPointerDown={(e) => {
                     e.stopPropagation();
-                    startDrag(itemId, 'tier', tier.index, e.nativeEvent.clientX, e.nativeEvent.clientY);
+                    startDrag(placed.itemId, placed.placementId, { type: 'tier', tierIndex: tier.index }, e.nativeEvent.clientX, e.nativeEvent.clientY);
                   }}
                 />
               );
             });
           })}
-          {dragInfo?.origin === 'tier' && dragLivePosition && (
-            <DraggingDollMesh itemId={dragInfo.itemId} livePosition={dragLivePosition} />
+
+          <BinCompartment isHovered={hoverBinCell !== null} registerHitPlane={registerBinHitPlane} />
+          {binState.placedItems.map((placed) => {
+            if (dragInfo?.origin.type === 'bin' && dragInfo.placementId === placed.placementId) return null;
+            return (
+              <PlacedBinDollMesh
+                key={placed.placementId}
+                bin={binState.bin}
+                placedItems={binState.placedItems}
+                placed={placed}
+                onPointerDown={(e) => {
+                  e.stopPropagation();
+                  startDrag(placed.itemId, placed.placementId, { type: 'bin' }, e.nativeEvent.clientX, e.nativeEvent.clientY);
+                }}
+              />
+            );
+          })}
+          {dragInfo && hoverBinCell && binHoverFit && (
+            <BinHoverPreview
+              col={hoverBinCell.col}
+              row={hoverBinCell.row}
+              item={ROOM_ITEMS_BY_ID[dragInfo.itemId]}
+              fitsOk={binHoverFit.class === 'fits'}
+            />
           )}
-          <mesh position={[0, -0.5, MAX_WIDTH]} rotation={[-Math.PI / 2, 0, 0]} receiveShadow>
-            <planeGeometry args={[300, 300]} />
+
+          {dragInfo && dragLivePosition && <DraggingDollMesh itemId={dragInfo.itemId} livePosition={dragLivePosition} />}
+
+          <mesh position={[BIN_CENTER_X / 2, -0.5, 20]} rotation={[-Math.PI / 2, 0, 0]} receiveShadow>
+            <planeGeometry args={[400, 400]} />
             <meshStandardMaterial color="#3a322c" />
           </mesh>
           <OrbitControls
             enabled={orbitEnabled}
-            target={[0, TOTAL_HEIGHT / 2, 10]}
+            target={[BIN_CENTER_X / 2, TOTAL_HEIGHT / 2, 10]}
             minDistance={30}
-            maxDistance={200}
+            maxDistance={260}
           />
         </Canvas>
       </div>
 
       <ItemTray
         draggingItemId={dragInfo?.itemId ?? null}
-        onItemPointerDown={(itemId, e) => startDrag(itemId, 'tray', undefined, e.clientX, e.clientY)}
+        onItemPointerDown={(itemId, e) => startDrag(itemId, crypto.randomUUID(), { type: 'tray' }, e.clientX, e.clientY)}
       />
 
       {hoverFitClass && (
         <p className="mt-1 text-center text-[11px] text-[#8a7362]">
           {hoverFitClass === 'force-overflow' ? '這層會塞不下，硬放會被擠壓' : hoverFitClass === 'snug-fit' ? '剛剛好' : '放得下'}
+        </p>
+      )}
+      {binHoverFit && (
+        <p className="mt-1 text-center text-[11px] text-[#8a7362]">
+          {binHoverFit.class === 'force-overflow' ? '這格放不下（重疊/超出範圍/太厚）' : '放得下'}
         </p>
       )}
 

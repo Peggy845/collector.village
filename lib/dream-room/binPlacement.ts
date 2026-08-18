@@ -43,7 +43,9 @@ function spansOverlap(
 }
 
 // 候選物件放在(col,row)這個位置（左上角錨點），算出是否超出箱子邊界、跟幾個既有物件重疊。
-// excludeItemId用在「拖曳已經在箱子裡的物件」時，不要跟自己算重疊。
+// excludePlacementId用在「拖曳已經在箱子裡的物件」時，不要跟自己算重疊——用placementId
+// 而不是itemId來排除自己，這樣同一itemId的第二份放進來時才會正確跟第一份算碰撞，
+// 不會因為itemId相同就被無條件放過（那樣兩份同種類娃娃永遠不會被判定重疊）。
 export function computeBinFit(
   bin: BinDef,
   existing: PlacedBinItem[],
@@ -51,7 +53,7 @@ export function computeBinFit(
   candidateItemId: string,
   col: number,
   row: number,
-  excludeItemId?: string
+  excludePlacementId?: string
 ): BinFitResult {
   const candidate = itemsById[candidateItemId];
   if (!candidate) return { class: 'fits', outOfBounds: false, overlapsCount: 0, depthOverflow: false };
@@ -60,7 +62,7 @@ export function computeBinFit(
   const depthOverflow = candidate.realDepthCm > bin.depthCm;
 
   const overlapsCount = existing.filter((placed) => {
-    if (placed.itemId === candidateItemId || placed.itemId === excludeItemId) return false;
+    if (placed.placementId === excludePlacementId) return false;
     const otherItem = itemsById[placed.itemId];
     if (!otherItem) return false;
     const otherSpan = computeItemSpan(bin, otherItem);
@@ -73,16 +75,31 @@ export function computeBinFit(
 
 // 狀態轉換：永遠成功（硬塞不擋，只影響視覺），不改動傳入的物件，回傳新的state。
 // 座標會夾在箱子範圍內（不會整個消失在畫面外），但允許跟其他物件重疊——重疊與否只影響
-// 渲染時的視覺擠壓效果，不影響能不能放。
-export function placeItemInBin(state: BinState, itemId: string, col: number, row: number): BinState {
-  const clampedCol = Math.max(0, Math.min(col, state.bin.cols - 1));
-  const clampedRow = Math.max(0, Math.min(row, state.bin.rows - 1));
-  const withoutItem = state.placedItems.filter((p) => p.itemId !== itemId);
-  return { ...state, placedItems: [...withoutItem, { itemId, col: clampedCol, row: clampedRow }] };
+// 渲染時的視覺擠壓效果，不影響能不能放。用placementId（不是itemId）當識別，同一itemId
+// 才能在箱子裡、甚至同一個場景的不同家具間，同時存在好幾份互不影響的「無限制擺放」。
+// 夾範圍要扣掉物件自己的colSpan/rowSpan，不能只夾錨點本身：物件常常比一格大，如果錨點
+// 夾到cols-1/rows-1，物件往右下延伸的範圍還是會超出邊界，變成computeBinFit永遠判定
+// outOfBounds、視覺一直被擠壓旋轉，即使畫面上看起來明明放得下。
+export function placeItemInBin(
+  state: BinState,
+  placementId: string,
+  itemId: string,
+  col: number,
+  row: number,
+  itemsById: Record<string, RoomItem>
+): BinState {
+  const item = itemsById[itemId];
+  const span = item ? computeItemSpan(state.bin, item) : { colSpan: 1, rowSpan: 1 };
+  const maxCol = Math.max(0, state.bin.cols - span.colSpan);
+  const maxRow = Math.max(0, state.bin.rows - span.rowSpan);
+  const clampedCol = Math.max(0, Math.min(col, maxCol));
+  const clampedRow = Math.max(0, Math.min(row, maxRow));
+  const withoutItem = state.placedItems.filter((p) => p.placementId !== placementId);
+  return { ...state, placedItems: [...withoutItem, { placementId, itemId, col: clampedCol, row: clampedRow }] };
 }
 
-export function removeItemFromBin(state: BinState, itemId: string): BinState {
-  return { ...state, placedItems: state.placedItems.filter((p) => p.itemId !== itemId) };
+export function removeItemFromBin(state: BinState, placementId: string): BinState {
+  return { ...state, placedItems: state.placedItems.filter((p) => p.placementId !== placementId) };
 }
 
 export function allBinPlacedItemIds(state: BinState): Set<string> {
