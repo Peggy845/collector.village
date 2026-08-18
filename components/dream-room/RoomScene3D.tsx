@@ -98,8 +98,11 @@ function SceneBridge({ onReady }: { onReady: (ctx: SceneCtx) => void }) {
 // 不該搶視覺重量），比原本的淡褐色 #ddc9b4 更不顯眼，露出來時看起來像陰影面而不是一塊亮白牌子。
 const DOLL_SIDE_COLOR = '#5c4f42';
 
-function useDollMaterials(textureUrl: string, opacity = 1) {
-  const texture = useTexture(textureUrl);
+// backTextureUrl是選填的背面貼圖（見RoomItem.backImage）——useTexture不能條件式呼叫
+// （會違反hooks規則），所以固定傳兩個URL進去（沒有背面貼圖時重複用正面URL湊數，drei的
+// useTexture本身有cache，重複載入同一張圖不會多花成本），實際用不用背面貼圖用JSX條件判斷。
+function useDollMaterials(textureUrl: string, opacity = 1, backTextureUrl?: string) {
+  const [texture, backTexture] = useTexture([textureUrl, backTextureUrl ?? textureUrl]);
   return (
     <>
       <meshStandardMaterial attach="material-0" color={DOLL_SIDE_COLOR} transparent={opacity < 1} opacity={opacity} />
@@ -107,7 +110,11 @@ function useDollMaterials(textureUrl: string, opacity = 1) {
       <meshStandardMaterial attach="material-2" color={DOLL_SIDE_COLOR} transparent={opacity < 1} opacity={opacity} />
       <meshStandardMaterial attach="material-3" color={DOLL_SIDE_COLOR} transparent={opacity < 1} opacity={opacity} />
       <meshStandardMaterial attach="material-4" map={texture} transparent alphaTest={0.3} opacity={opacity} />
-      <meshStandardMaterial attach="material-5" color={DOLL_SIDE_COLOR} transparent={opacity < 1} opacity={opacity} />
+      {backTextureUrl ? (
+        <meshStandardMaterial attach="material-5" map={backTexture} transparent alphaTest={0.3} opacity={opacity} />
+      ) : (
+        <meshStandardMaterial attach="material-5" color={DOLL_SIDE_COLOR} transparent={opacity < 1} opacity={opacity} />
+      )}
     </>
   );
 }
@@ -148,7 +155,7 @@ function PlacedDollMesh({
       renderOrder={isForceOverflow ? 1 : 0}
     >
       <boxGeometry args={[item.realWidthCm, item.realHeightCm, item.realDepthCm]} />
-      {useDollMaterials(item.image)}
+      {useDollMaterials(item.image, 1, item.backImage)}
     </mesh>
   );
 }
@@ -183,7 +190,7 @@ function PlacedBinDollMesh({
       renderOrder={isForceOverflow ? 1 : 0}
     >
       <boxGeometry args={[item.realWidthCm, item.realHeightCm, item.realDepthCm]} />
-      {useDollMaterials(item.image)}
+      {useDollMaterials(item.image, 1, item.backImage)}
     </mesh>
   );
 }
@@ -195,7 +202,7 @@ function DraggingDollMesh({ itemId, livePosition }: { itemId: string; livePositi
   return (
     <mesh position={livePosition} renderOrder={2}>
       <boxGeometry args={[item.realWidthCm, item.realHeightCm, item.realDepthCm]} />
-      {useDollMaterials(item.image, 0.9)}
+      {useDollMaterials(item.image, 0.9, item.backImage)}
     </mesh>
   );
 }
