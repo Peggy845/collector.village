@@ -1,3 +1,4 @@
+import * as THREE from 'three';
 import type { PlacedTierItem, TierDef, TierState, BinDef } from './furniture';
 import type { RoomItem } from './roomItems';
 
@@ -96,4 +97,49 @@ export function computeInsertIndex(
     else break;
   }
   return insertIndex;
+}
+
+export interface ViewportRect {
+  left: number;
+  right: number;
+  top: number;
+  bottom: number;
+  width: number;
+  height: number;
+}
+
+export type FurnitureHitResult =
+  | { kind: 'tier'; tierIndex: number; point: THREE.Vector3 }
+  | { kind: 'bin'; col: number; row: number; point: THREE.Vector3 };
+
+// 拖曳放開手時，判斷滑鼠/手指底下打中場景裡哪一個家具的落點判定面（層架用tierPlanes，
+// 堆疊箱用binPlane，兩者都是不可見的hit-plane mesh，userData帶著kind跟tierIndex方便反查）。
+// 這是three.js的Raycaster數學本身（跟WebGL渲染無關），只依賴camera/mesh的資料結構，
+// 不需要真的有畫面/canvas，所以能抽出來獨立測試——呼叫端（RoomScene3D.tsx）只需要另外
+// 從真實的canvas DOM element算出rect再傳進來。
+export function raycastFurnitureHit(
+  clientX: number,
+  clientY: number,
+  camera: THREE.Camera,
+  rect: ViewportRect,
+  tierPlanes: Record<number, THREE.Mesh | null>,
+  binPlane: THREE.Mesh | null,
+  binLayout: BinLayout
+): FurnitureHitResult | null {
+  if (clientX < rect.left || clientX > rect.right || clientY < rect.top || clientY > rect.bottom) return null;
+  const ndc = new THREE.Vector2(
+    ((clientX - rect.left) / rect.width) * 2 - 1,
+    -((clientY - rect.top) / rect.height) * 2 + 1
+  );
+  const raycaster = new THREE.Raycaster();
+  raycaster.setFromCamera(ndc, camera);
+  const targets = [...Object.values(tierPlanes).filter((m): m is THREE.Mesh => m !== null)];
+  if (binPlane) targets.push(binPlane);
+  const hits = raycaster.intersectObjects(targets, false);
+  if (hits.length === 0) return null;
+  const hit = hits[0];
+  const data = hit.object.userData as { kind: 'tier'; tierIndex: number } | { kind: 'bin' };
+  if (data.kind === 'tier') return { kind: 'tier', tierIndex: data.tierIndex, point: hit.point };
+  const { col, row } = binCellFromPoint(binLayout, hit.point.x, hit.point.y);
+  return { kind: 'bin', col, row, point: hit.point };
 }

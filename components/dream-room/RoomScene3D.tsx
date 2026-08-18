@@ -34,8 +34,9 @@ import {
   computeInsertIndex,
   computeTierYBase,
   binCellCenterWorld,
-  binCellFromPoint,
+  raycastFurnitureHit,
   tierItemPositions,
+  type FurnitureHitResult,
 } from '@/lib/dream-room/scene3d';
 import ItemTray from '@/components/dream-room/ItemTray';
 
@@ -68,10 +69,10 @@ interface SceneCtx {
   gl: THREE.WebGLRenderer;
 }
 
-type HitResult =
-  | { kind: 'tier'; tierIndex: number; point: THREE.Vector3 }
-  | { kind: 'bin'; col: number; row: number; point: THREE.Vector3 };
+type HitResult = FurnitureHitResult;
 
+// 薄薄一層：只管「從真實canvas DOM element算出rect」這種跟畫面/three.js Renderer綁定、
+// 沒辦法單元測試的部分，實際的raycasting數學都在lib/dream-room/scene3d.ts可以獨立測試。
 function raycastFurniture(
   clientX: number,
   clientY: number,
@@ -81,22 +82,7 @@ function raycastFurniture(
 ): HitResult | null {
   if (!ctx) return null;
   const rect = ctx.gl.domElement.getBoundingClientRect();
-  if (clientX < rect.left || clientX > rect.right || clientY < rect.top || clientY > rect.bottom) return null;
-  const ndc = new THREE.Vector2(
-    ((clientX - rect.left) / rect.width) * 2 - 1,
-    -((clientY - rect.top) / rect.height) * 2 + 1
-  );
-  const raycaster = new THREE.Raycaster();
-  raycaster.setFromCamera(ndc, ctx.camera);
-  const targets = [...Object.values(tierPlanes).filter((m): m is THREE.Mesh => m !== null)];
-  if (binPlane) targets.push(binPlane);
-  const hits = raycaster.intersectObjects(targets, false);
-  if (hits.length === 0) return null;
-  const hit = hits[0];
-  const data = hit.object.userData as { kind: 'tier'; tierIndex: number } | { kind: 'bin' };
-  if (data.kind === 'tier') return { kind: 'tier', tierIndex: data.tierIndex, point: hit.point };
-  const { col, row } = binCellFromPoint(BIN_LAYOUT, hit.point.x, hit.point.y);
-  return { kind: 'bin', col, row, point: hit.point };
+  return raycastFurnitureHit(clientX, clientY, ctx.camera, rect, tierPlanes, binPlane, BIN_LAYOUT);
 }
 
 function SceneBridge({ onReady }: { onReady: (ctx: SceneCtx) => void }) {
