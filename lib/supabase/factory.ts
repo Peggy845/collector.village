@@ -12,7 +12,11 @@ import { computeSlotRemaining } from '@/lib/market/catalog';
 // 「賣完」不等玩家按「入帳」——貨架格子一旦賣完就不會再顯示在 /market（見 ShelfCard 已售完
 // 隱藏的邏輯），入帳只是把錢轉成遊戲幣的動作，跟這張圖還用不用得到是兩件事
 // （2026-08-03 跟 Peggy 確認過的判斷標準）。
-export async function fetchFactoryDesigns(supabase: SupabaseClient, userId: string): Promise<FactoryDesign[]> {
+export async function fetchFactoryDesigns(
+  supabase: SupabaseClient,
+  userId: string,
+  now: number = Date.now()
+): Promise<FactoryDesign[]> {
   const { data, error } = await supabase
     .from('factory_designs')
     .select('*')
@@ -40,7 +44,7 @@ export async function fetchFactoryDesigns(supabase: SupabaseClient, userId: stri
     .filter((d) => d.player_design_id != null && tempPlayerDesignIds.has(d.player_design_id))
     .map((d) => d.id);
 
-  const stillInUse = await fetchDesignIdsStillInUse(supabase, userId, tempDesignIds);
+  const stillInUse = await fetchDesignIdsStillInUse(supabase, userId, tempDesignIds, now);
 
   return designs.filter(
     (d) => !(d.player_design_id != null && tempPlayerDesignIds.has(d.player_design_id) && !stillInUse.has(d.id))
@@ -55,7 +59,8 @@ export async function fetchFactoryDesigns(supabase: SupabaseClient, userId: stri
 export async function fetchDesignIdsStillInUse(
   supabase: SupabaseClient,
   userId: string,
-  designIds: number[]
+  designIds: number[],
+  now: number = Date.now()
 ): Promise<Set<number>> {
   const inUse = new Set<number>();
   if (designIds.length === 0) return inUse;
@@ -84,7 +89,6 @@ export async function fetchDesignIdsStillInUse(
       .select('*')
       .in('furniture_id', furnitureIds)
       .in('design_id', designIds);
-    const now = Date.now();
     for (const row of (slots ?? []) as MarketFurnitureSlot[]) {
       if (computeSlotRemaining(row, now) > 0) inUse.add(row.design_id);
     }

@@ -83,6 +83,19 @@ class FakeBuilder implements PromiseLike<{ data: unknown; error: null }> {
     this.filters.push((r) => vals.includes(r[col]));
     return this;
   }
+  // 只支援本專案實際用到的postgrest .or()語法子集：逗號分隔的"col.op.val"子句，op只認
+  // is（配null）跟eq，例如 "user_id.is.null,user_id.eq.abc"（見lib/supabase/factory.ts
+  // fetchFactoryDesigns），不是完整的postgrest filter parser。
+  or(condition: string) {
+    const checks = condition.split(',').map((clause) => {
+      const [col, op, val] = clause.trim().split('.');
+      if (op === 'is' && val === 'null') return (r: Row) => r[col] === null || r[col] === undefined;
+      if (op === 'eq') return (r: Row) => String(r[col]) === val;
+      return () => false;
+    });
+    this.filters.push((r) => checks.some((check) => check(r)));
+    return this;
+  }
   order(col: string, opts?: { ascending?: boolean }) {
     this.orderCol = col;
     this.orderAsc = opts?.ascending !== false;
