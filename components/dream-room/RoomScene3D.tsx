@@ -18,7 +18,6 @@ import {
   STACKING_BIN,
   createInitialFurnitureState,
   type FurnitureState,
-  type PlacedTierItem,
   type TierDef,
   type TierState,
 } from '@/lib/dream-room/furniture';
@@ -30,6 +29,14 @@ import {
 } from '@/lib/dream-room/placement';
 import { computeBinFit, placeItemInBin, removeItemFromBin } from '@/lib/dream-room/binPlacement';
 import { ROOM_ITEMS_BY_ID } from '@/lib/dream-room/roomItems';
+import {
+  computeBinLayout,
+  computeInsertIndex,
+  computeTierYBase,
+  binCellCenterWorld,
+  binCellFromPoint,
+  tierItemPositions,
+} from '@/lib/dream-room/scene3d';
 import ItemTray from '@/components/dream-room/ItemTray';
 
 type BookshelfState = Extract<FurnitureState, { type: 'bookshelf' }>;
@@ -42,74 +49,19 @@ const BIN_COLOR = '#8fb4c9';
 const BIN_COLOR_HOVER = '#a9cbdd';
 
 // 由下往上疊（陣列index2排最下面、index0排最上面，跟FurnitureZoom.tsx的正視圖上到下順序一致），
-// 算好每一層的y起點，模組層級算一次即可，家具定義本身不會變動。
-const TIER_Y_BASE: Record<number, number> = (() => {
-  const orderedBottomUp = [...BOOKSHELF.tiers].sort((a, b) => b.index - a.index);
-  let cursor = 0;
-  const map: Record<number, number> = {};
-  for (const tier of orderedBottomUp) {
-    map[tier.index] = cursor;
-    cursor += tier.clearanceHeightCm + GAP_CM;
-  }
-  return map;
-})();
+// 算好每一層的y起點，模組層級算一次即可，家具定義本身不會變動。純幾何計算抽在
+// lib/dream-room/scene3d.ts方便單元測試，這裡只留場景本身的常數/JSX。
+const TIER_Y_BASE = computeTierYBase(BOOKSHELF.tiers, GAP_CM);
 const TOTAL_HEIGHT = Math.max(...BOOKSHELF.tiers.map((t) => TIER_Y_BASE[t.index] + t.clearanceHeightCm));
 const MAX_WIDTH = Math.max(...BOOKSHELF.tiers.map((t) => t.usableWidthCm));
 
 // 堆疊箱放在書櫃右邊，兩件家具在同一個房間場景裡，不互相重疊。
 const BIN = STACKING_BIN.bin;
-const BIN_WIDTH = BIN.cols * BIN.cellWidthCm;
-const BIN_HEIGHT = BIN.rows * BIN.cellHeightCm;
-const BIN_CENTER_X = MAX_WIDTH / 2 + 30 + BIN_WIDTH / 2;
-const BIN_LEFT = BIN_CENTER_X - BIN_WIDTH / 2;
-
-function binCellFromPoint(point: THREE.Vector3): { col: number; row: number } {
-  const col = Math.floor((point.x - BIN_LEFT) / BIN.cellWidthCm);
-  const row = Math.floor((BIN_HEIGHT - point.y) / BIN.cellHeightCm);
-  return { col, row };
-}
-
-// 錨點是格子(col,row)的左上角，娃娃實際尺寸往右下延伸——跟2D版BinZoom.tsx（left/top用格子左上角、
-// width/height用娃娃實際像素尺寸）同一個錨點規則，也跟computeBinFit的colSpan/rowSpan碰撞判定一致。
-// 娃娃常常比一格大（例如14x18cm放進12x12cm格），如果誤用「格子正中心」當娃娃中心點，
-// 娃娃會偏離自己實際佔用的格子範圍，跟旁邊格子的視覺/碰撞就對不起來。
-function binCellCenterWorld(col: number, row: number, item: { realWidthCm: number; realHeightCm: number }): { x: number; y: number } {
-  return {
-    x: BIN_LEFT + col * BIN.cellWidthCm + item.realWidthCm / 2,
-    y: BIN_HEIGHT - (row * BIN.cellHeightCm + item.realHeightCm / 2),
-  };
-}
-
-// 給一層架跟排列順序（已排除正在拖曳中的那個），算出每個item由左到右累加排隊後的中心x
-// （tier本身以x=0置中，範圍是[-usableWidthCm/2, +usableWidthCm/2]），跟TopDownFootprint.tsx
-// 的累加邏輯同一個精神，只是這裡輸出世界座標x而不是px。用placementId當識別（不是itemId），
-// 同一itemId才能在同一層架同時存在好幾份互不影響的「無限制擺放」。
-function tierItemPositions(
-  tier: TierDef,
-  items: PlacedTierItem[]
-): { placementId: string; itemId: string; centerX: number; widthCm: number }[] {
-  let cursor = -tier.usableWidthCm / 2;
-  const result: { placementId: string; itemId: string; centerX: number; widthCm: number }[] = [];
-  for (const p of items) {
-    const item = ROOM_ITEMS_BY_ID[p.itemId];
-    if (!item) continue;
-    const centerX = cursor + item.realWidthCm / 2;
-    result.push({ placementId: p.placementId, itemId: p.itemId, centerX, widthCm: item.realWidthCm });
-    cursor += item.realWidthCm;
-  }
-  return result;
-}
-
-function computeInsertIndex(tier: TierState, dropWorldX: number, excludePlacementId: string): number {
-  const others = tier.placedItems.filter((p) => p.placementId !== excludePlacementId);
-  const positions = tierItemPositions(tier, others);
-  let insertIndex = 0;
-  for (const { centerX } of positions) {
-    if (dropWorldX > centerX) insertIndex++;
-    else break;
-  }
-  return insertIndex;
-}
+const BIN_LAYOUT = computeBinLayout(MAX_WIDTH, BIN, 30);
+const BIN_WIDTH = BIN_LAYOUT.width;
+const BIN_HEIGHT = BIN_LAYOUT.height;
+const BIN_CENTER_X = BIN_LAYOUT.centerX;
+const BIN_LEFT = BIN_LAYOUT.left;
 
 interface SceneCtx {
   camera: THREE.Camera;
@@ -143,7 +95,7 @@ function raycastFurniture(
   const hit = hits[0];
   const data = hit.object.userData as { kind: 'tier'; tierIndex: number } | { kind: 'bin' };
   if (data.kind === 'tier') return { kind: 'tier', tierIndex: data.tierIndex, point: hit.point };
-  const { col, row } = binCellFromPoint(hit.point);
+  const { col, row } = binCellFromPoint(BIN_LAYOUT, hit.point.x, hit.point.y);
   return { kind: 'bin', col, row, point: hit.point };
 }
 
@@ -231,7 +183,7 @@ function PlacedBinDollMesh({
   const item = ROOM_ITEMS_BY_ID[placed.itemId];
   const fit = computeBinFit(bin, placedItems, ROOM_ITEMS_BY_ID, placed.itemId, placed.col, placed.row, placed.placementId);
   const isForceOverflow = fit.class === 'force-overflow';
-  const { x, y } = binCellCenterWorld(placed.col, placed.row, item);
+  const { x, y } = binCellCenterWorld(BIN_LAYOUT, placed.col, placed.row, item);
   const z = item.realDepthCm / 2;
 
   return (
@@ -402,7 +354,7 @@ function BinHoverPreview({
   item: { realWidthCm: number; realHeightCm: number };
   fitsOk: boolean;
 }) {
-  const { x, y } = binCellCenterWorld(col, row, item);
+  const { x, y } = binCellCenterWorld(BIN_LAYOUT, col, row, item);
   return (
     <mesh position={[x, y, BIN.depthCm / 2]}>
       <planeGeometry args={[item.realWidthCm * 0.95, item.realHeightCm * 0.95]} />
@@ -454,13 +406,13 @@ export default function RoomScene3D() {
 
     if (origin.type === 'tier') {
       const tier = furnitureState.tiers.find((t) => t.index === origin.tierIndex)!;
-      const positions = tierItemPositions(tier, tier.placedItems);
+      const positions = tierItemPositions(tier, tier.placedItems, ROOM_ITEMS_BY_ID);
       const pos = positions.find((p) => p.placementId === placementId);
       startPoint = new THREE.Vector3(pos?.centerX ?? 0, TIER_Y_BASE[origin.tierIndex] + item.realHeightCm / 2, item.realDepthCm / 2);
     } else if (origin.type === 'bin') {
       const placed = binState.placedItems.find((p) => p.placementId === placementId);
       if (placed) {
-        const { x, y } = binCellCenterWorld(placed.col, placed.row, item);
+        const { x, y } = binCellCenterWorld(BIN_LAYOUT, placed.col, placed.row, item);
         startPoint = new THREE.Vector3(x, y, item.realDepthCm / 2);
       }
     }
@@ -518,7 +470,7 @@ export default function RoomScene3D() {
         if (hit?.kind === 'tier') {
           setFurnitureState((prev) => {
             const tier = prev.tiers.find((t) => t.index === hit.tierIndex)!;
-            const insertAt = computeInsertIndex(tier, hit.point.x, current.placementId);
+            const insertAt = computeInsertIndex(tier, hit.point.x, current.placementId, ROOM_ITEMS_BY_ID);
             let placed = placeItemOnTier(prev, hit.tierIndex, current.placementId, current.itemId, insertAt);
             // 只有從收藏匣拖進畫面才是「新增一份」，畫面內移動（不管同一件家具內換層架、
             // 還是跨家具搬）一律只是搬移，來源那份都要清掉，不能變複製。
@@ -593,7 +545,7 @@ export default function RoomScene3D() {
             />
           ))}
           {furnitureState.tiers.map((tier) => {
-            const positions = tierItemPositions(tier, tier.placedItems);
+            const positions = tierItemPositions(tier, tier.placedItems, ROOM_ITEMS_BY_ID);
             return tier.placedItems.map((placed, indexInTier) => {
               if (dragInfo?.origin.type === 'tier' && dragInfo.placementId === placed.placementId) return null;
               const pos = positions.find((p) => p.placementId === placed.placementId);
