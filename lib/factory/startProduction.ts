@@ -9,7 +9,8 @@ export type StartProductionResult = { ok: true; readyAt: string } | { ok: false;
 
 export async function startProductionBatch(
   admin: SupabaseClient,
-  params: { userId: string; machineKey: string; formatKey: string; designId: number }
+  params: { userId: string; machineKey: string; formatKey: string; designId: number },
+  now: number = Date.now()
 ): Promise<StartProductionResult> {
   const { userId, machineKey, formatKey, designId } = params;
 
@@ -54,7 +55,7 @@ export async function startProductionBatch(
     return { ok: false, error: `遊戲幣不足，需要 ${cost} 枚，目前只有 ${balance} 枚`, status: 400 };
   }
 
-  const readyAt = computeQueuedBatchReadyAt(existingQueue[0]?.ready_at ?? null, Date.now(), format.productionMinutes);
+  const readyAt = computeQueuedBatchReadyAt(existingQueue[0]?.ready_at ?? null, now, format.productionMinutes);
 
   const { error: batchError } = await admin.from('factory_production_batches').insert({
     user_id: userId,
