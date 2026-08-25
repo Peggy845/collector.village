@@ -2,7 +2,7 @@
 
 import type { CSSProperties, PointerEvent as ReactPointerEvent } from 'react';
 import type { FurnitureState } from '@/lib/dream-room/furniture';
-import { ROOM_ITEMS_BY_ID } from '@/lib/dream-room/roomItems';
+import type { RoomItem } from '@/lib/dream-room/roomItems';
 import { computePegFit } from '@/lib/dream-room/pegPlacement';
 import { PX_PER_CM } from '@/lib/dream-room/scale';
 
@@ -14,6 +14,7 @@ export default function PegZoom({
   dragPlacementId,
   hoverCell,
   justPlacedId,
+  itemsById,
   onItemPointerDown,
   onBack,
 }: {
@@ -22,6 +23,7 @@ export default function PegZoom({
   dragPlacementId: string | null;
   hoverCell: { col: number; row: number } | null;
   justPlacedId: string | null;
+  itemsById: Record<string, RoomItem>;
   onItemPointerDown: (itemId: string, placementId: string, e: ReactPointerEvent) => void;
   onBack: () => void;
 }) {
@@ -31,10 +33,10 @@ export default function PegZoom({
   const boardWidthPx = peg.cols * spacingXPx;
   const boardHeightPx = peg.rows * spacingYPx + peg.hangClearanceCmBelowBoard * PX_PER_CM;
 
-  const dragCandidate = dragItemId ? ROOM_ITEMS_BY_ID[dragItemId] : null;
+  const dragCandidate = dragItemId ? itemsById[dragItemId] : null;
   const hoverFit =
     dragItemId && hoverCell
-      ? computePegFit(peg, placedItems, ROOM_ITEMS_BY_ID, dragItemId, hoverCell.col, hoverCell.row, dragPlacementId ?? undefined)
+      ? computePegFit(peg, placedItems, itemsById, dragItemId, hoverCell.col, hoverCell.row, dragPlacementId ?? undefined)
       : null;
 
   return (
@@ -82,9 +84,9 @@ export default function PegZoom({
           )}
 
           {placedItems.map((placed) => {
-            const item = ROOM_ITEMS_BY_ID[placed.itemId];
+            const item = itemsById[placed.itemId];
             if (!item) return null;
-            const fit = computePegFit(peg, placedItems, ROOM_ITEMS_BY_ID, placed.itemId, placed.col, placed.row, placed.placementId);
+            const fit = computePegFit(peg, placedItems, itemsById, placed.itemId, placed.col, placed.row, placed.placementId);
             const isSquashed = fit.class === 'force-overflow';
             const isBeingDragged = placed.placementId === dragPlacementId;
 

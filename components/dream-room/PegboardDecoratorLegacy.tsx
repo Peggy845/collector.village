@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { PEGBOARD, createInitialFurnitureState, type FurnitureState } from '@/lib/dream-room/furniture';
 import { placeItemOnPeg, removeItemFromPeg } from '@/lib/dream-room/pegPlacement';
-import { ROOM_ITEMS_BY_ID } from '@/lib/dream-room/roomItems';
+import { useRoomItemsById } from '@/lib/dream-room/useRoomItems';
 import PegZoom from '@/components/dream-room/PegZoom';
 import ItemTray from '@/components/dream-room/ItemTray';
 
@@ -17,6 +17,7 @@ type DragOrigin = { type: 'tray' } | { type: 'peg' };
 // RoomDecorator.tsx原本peg分支的子集。
 export default function PegboardDecoratorLegacy() {
   const router = useRouter();
+  const itemsById = useRoomItemsById();
   const [pegState, setPegState] = useState<PegboardState>(() => createInitialFurnitureState(PEGBOARD));
   const [justPlacedPlacementId, setJustPlacedPlacementId] = useState<string | null>(null);
   const [dragInfo, setDragInfo] = useState<{ itemId: string; placementId: string; origin: DragOrigin } | null>(null);
@@ -94,7 +95,7 @@ export default function PegboardDecoratorLegacy() {
     setDragPos({ x: clientX, y: clientY, hoverPegCell: null });
   }
 
-  const dragImage = dragInfo ? ROOM_ITEMS_BY_ID[dragInfo.itemId] : null;
+  const dragImage = dragInfo ? itemsById[dragInfo.itemId] : null;
 
   return (
     <div className="mx-auto w-full max-w-2xl">
@@ -102,6 +103,7 @@ export default function PegboardDecoratorLegacy() {
         <div className="relative h-[420px] bg-[#FBF3EC]">
           <PegZoom
             furnitureState={pegState}
+            itemsById={itemsById}
             dragItemId={dragInfo?.itemId ?? null}
             dragPlacementId={dragInfo?.placementId ?? null}
             hoverCell={dragInfo ? dragPos.hoverPegCell : null}

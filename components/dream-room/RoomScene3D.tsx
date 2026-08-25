@@ -28,7 +28,8 @@ import {
   removeItemFromTier,
 } from '@/lib/dream-room/placement';
 import { computeBinFit, placeItemInBin, removeItemFromBin } from '@/lib/dream-room/binPlacement';
-import { ROOM_ITEMS_BY_ID } from '@/lib/dream-room/roomItems';
+import type { RoomItem } from '@/lib/dream-room/roomItems';
+import { useRoomItemsById } from '@/lib/dream-room/useRoomItems';
 import {
   computeBinLayout,
   computeInsertIndex,
@@ -127,6 +128,7 @@ function PlacedDollMesh({
   itemId,
   centerX,
   indexInTier,
+  itemsById,
   onPointerDown,
 }: {
   tier: TierState;
@@ -134,10 +136,11 @@ function PlacedDollMesh({
   itemId: string;
   centerX: number;
   indexInTier: number;
+  itemsById: Record<string, RoomItem>;
   onPointerDown: (e: ThreeEvent<PointerEvent>) => void;
 }) {
-  const item = ROOM_ITEMS_BY_ID[itemId];
-  const fit = computeFitForPlacedItem(tier, ROOM_ITEMS_BY_ID, indexInTier);
+  const item = itemsById[itemId];
+  const fit = computeFitForPlacedItem(tier, itemsById, indexInTier);
   const isForceOverflow = fit.class === 'force-overflow';
   const scaleX = fit.widthStatus === 'overflow' ? 1 - fit.widthSquash : 1;
   const scaleY = fit.heightStatus === 'overflow' ? 1 - fit.heightSquash : 1;
@@ -166,15 +169,17 @@ function PlacedBinDollMesh({
   bin,
   placedItems,
   placed,
+  itemsById,
   onPointerDown,
 }: {
   bin: BinState['bin'];
   placedItems: BinState['placedItems'];
   placed: BinState['placedItems'][number];
+  itemsById: Record<string, RoomItem>;
   onPointerDown: (e: ThreeEvent<PointerEvent>) => void;
 }) {
-  const item = ROOM_ITEMS_BY_ID[placed.itemId];
-  const fit = computeBinFit(bin, placedItems, ROOM_ITEMS_BY_ID, placed.itemId, placed.col, placed.row, placed.placementId);
+  const item = itemsById[placed.itemId];
+  const fit = computeBinFit(bin, placedItems, itemsById, placed.itemId, placed.col, placed.row, placed.placementId);
   const isForceOverflow = fit.class === 'force-overflow';
   const { x, y } = binCellCenterWorld(BIN_LAYOUT, placed.col, placed.row, item);
   const z = item.realDepthCm / 2;
@@ -197,8 +202,16 @@ function PlacedBinDollMesh({
 
 // 正在被拖曳中的娃娃（來源是層架或堆疊箱上既有的項目），用一片面向鏡頭、通過拖曳起點的
 // 隱形平面追蹤滑鼠/手指位置，不在拖曳中即時判斷/夾住落點，放開手才由外層做正式的落點判斷。
-function DraggingDollMesh({ itemId, livePosition }: { itemId: string; livePosition: THREE.Vector3 }) {
-  const item = ROOM_ITEMS_BY_ID[itemId];
+function DraggingDollMesh({
+  itemId,
+  livePosition,
+  itemsById,
+}: {
+  itemId: string;
+  livePosition: THREE.Vector3;
+  itemsById: Record<string, RoomItem>;
+}) {
+  const item = itemsById[itemId];
   return (
     <mesh position={livePosition} renderOrder={2}>
       <boxGeometry args={[item.realWidthCm, item.realHeightCm, item.realDepthCm]} />
@@ -360,6 +373,7 @@ type DragOrigin = { type: 'tray' } | { type: 'tier'; tierIndex: number } | { typ
 type DragInfo = { itemId: string; placementId: string; origin: DragOrigin };
 
 export default function RoomScene3D() {
+  const itemsById = useRoomItemsById();
   const [furnitureState, setFurnitureState] = useState<BookshelfState>(() => createInitialFurnitureState(BOOKSHELF));
   const [binState, setBinState] = useState<BinState>(() => createInitialFurnitureState(STACKING_BIN));
   const [dragInfo, setDragInfo] = useState<DragInfo | null>(null);
@@ -395,11 +409,11 @@ export default function RoomScene3D() {
 
     if (!sceneCtxRef.current) return;
     let startPoint: THREE.Vector3 | null = null;
-    const item = ROOM_ITEMS_BY_ID[itemId];
+    const item = itemsById[itemId];
 
     if (origin.type === 'tier') {
       const tier = furnitureState.tiers.find((t) => t.index === origin.tierIndex)!;
-      const positions = tierItemPositions(tier, tier.placedItems, ROOM_ITEMS_BY_ID);
+      const positions = tierItemPositions(tier, tier.placedItems, itemsById);
       const pos = positions.find((p) => p.placementId === placementId);
       startPoint = new THREE.Vector3(pos?.centerX ?? 0, TIER_Y_BASE[origin.tierIndex] + item.realHeightCm / 2, item.realDepthCm / 2);
     } else if (origin.type === 'bin') {
@@ -463,7 +477,7 @@ export default function RoomScene3D() {
         if (hit?.kind === 'tier') {
           setFurnitureState((prev) => {
             const tier = prev.tiers.find((t) => t.index === hit.tierIndex)!;
-            const insertAt = computeInsertIndex(tier, hit.point.x, current.placementId, ROOM_ITEMS_BY_ID);
+            const insertAt = computeInsertIndex(tier, hit.point.x, current.placementId, itemsById);
             let placed = placeItemOnTier(prev, hit.tierIndex, current.placementId, current.itemId, insertAt);
             // 只有從收藏匣拖進畫面才是「新增一份」，畫面內移動（不管同一件家具內換層架、
             // 還是跨家具搬）一律只是搬移，來源那份都要清掉，不能變複製。
@@ -476,7 +490,7 @@ export default function RoomScene3D() {
             setBinState((prev) => removeItemFromBin(prev, current.placementId));
           }
         } else if (hit?.kind === 'bin') {
-          setBinState((prev) => placeItemInBin(prev, current.placementId, current.itemId, hit.col, hit.row, ROOM_ITEMS_BY_ID));
+          setBinState((prev) => placeItemInBin(prev, current.placementId, current.itemId, hit.col, hit.row, itemsById));
           // 同一堆疊箱內搬移由placeItemInBin自己去重處理；跨家具(書櫃→堆疊箱)要另外把書櫃那份清掉。
           if (current.origin.type === 'tier') {
             const originTierIndex = current.origin.tierIndex;
@@ -499,21 +513,21 @@ export default function RoomScene3D() {
       window.removeEventListener('pointermove', handleMove);
       window.removeEventListener('pointerup', handleUp);
     };
-  }, [dragInfo]);
+  }, [dragInfo, itemsById]);
 
-  const dragImage = dragInfo?.origin.type === 'tray' ? ROOM_ITEMS_BY_ID[dragInfo.itemId] : null;
+  const dragImage = dragInfo?.origin.type === 'tray' ? itemsById[dragInfo.itemId] : null;
 
   const hoverFitClass = useMemo(() => {
     if (!dragInfo || hoverTierIndex === null) return null;
     const tier = furnitureState.tiers.find((t) => t.index === hoverTierIndex);
     if (!tier) return null;
-    return computeTierFitForCandidate(tier, ROOM_ITEMS_BY_ID, dragInfo.itemId).class;
-  }, [dragInfo, hoverTierIndex, furnitureState]);
+    return computeTierFitForCandidate(tier, itemsById, dragInfo.itemId).class;
+  }, [dragInfo, hoverTierIndex, furnitureState, itemsById]);
 
   const binHoverFit = useMemo(() => {
     if (!dragInfo || !hoverBinCell) return null;
-    return computeBinFit(BIN, binState.placedItems, ROOM_ITEMS_BY_ID, dragInfo.itemId, hoverBinCell.col, hoverBinCell.row, dragInfo.placementId);
-  }, [dragInfo, hoverBinCell, binState]);
+    return computeBinFit(BIN, binState.placedItems, itemsById, dragInfo.itemId, hoverBinCell.col, hoverBinCell.row, dragInfo.placementId);
+  }, [dragInfo, hoverBinCell, binState, itemsById]);
 
   return (
     <div className="relative">
@@ -538,7 +552,7 @@ export default function RoomScene3D() {
             />
           ))}
           {furnitureState.tiers.map((tier) => {
-            const positions = tierItemPositions(tier, tier.placedItems, ROOM_ITEMS_BY_ID);
+            const positions = tierItemPositions(tier, tier.placedItems, itemsById);
             return tier.placedItems.map((placed, indexInTier) => {
               if (dragInfo?.origin.type === 'tier' && dragInfo.placementId === placed.placementId) return null;
               const pos = positions.find((p) => p.placementId === placed.placementId);
@@ -551,6 +565,7 @@ export default function RoomScene3D() {
                   itemId={placed.itemId}
                   centerX={pos.centerX}
                   indexInTier={indexInTier}
+                  itemsById={itemsById}
                   onPointerDown={(e) => {
                     e.stopPropagation();
                     startDrag(placed.itemId, placed.placementId, { type: 'tier', tierIndex: tier.index }, e.nativeEvent.clientX, e.nativeEvent.clientY);
@@ -569,6 +584,7 @@ export default function RoomScene3D() {
                 bin={binState.bin}
                 placedItems={binState.placedItems}
                 placed={placed}
+                itemsById={itemsById}
                 onPointerDown={(e) => {
                   e.stopPropagation();
                   startDrag(placed.itemId, placed.placementId, { type: 'bin' }, e.nativeEvent.clientX, e.nativeEvent.clientY);
@@ -580,12 +596,14 @@ export default function RoomScene3D() {
             <BinHoverPreview
               col={hoverBinCell.col}
               row={hoverBinCell.row}
-              item={ROOM_ITEMS_BY_ID[dragInfo.itemId]}
+              item={itemsById[dragInfo.itemId]}
               fitsOk={binHoverFit.class === 'fits'}
             />
           )}
 
-          {dragInfo && dragLivePosition && <DraggingDollMesh itemId={dragInfo.itemId} livePosition={dragLivePosition} />}
+          {dragInfo && dragLivePosition && (
+            <DraggingDollMesh itemId={dragInfo.itemId} livePosition={dragLivePosition} itemsById={itemsById} />
+          )}
 
           <mesh position={[BIN_CENTER_X / 2, -0.5, 20]} rotation={[-Math.PI / 2, 0, 0]} receiveShadow>
             <planeGeometry args={[400, 400]} />
